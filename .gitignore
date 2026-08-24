@@ -1,0 +1,6 @@
+dados-reais/
+testes/_nucleo.gerado.mjs
+*.orig
+node_modules/
+.DS_Store
+Thumbs.db

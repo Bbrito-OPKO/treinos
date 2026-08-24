@@ -1,0 +1,92 @@
+/* ===========================================================================
+   Service worker: e ele que faz a app abrir com o telemovel em modo de aviao.
+
+   Duas estrategias diferentes, de proposito:
+
+   - A PAGINA (index.html) e servida da cache e, ao mesmo tempo, pedida a rede
+     em segundo plano para a copia guardada ficar actualizada. Assim a app abre
+     de imediato, mesmo sem rede, e apanha uma versao nova na abertura
+     seguinte. Ir a rede primeiro faria a app demorar a abrir num ginasio com
+     mau sinal, que e exactamente onde ela e usada.
+
+   - OS FICHEIROS FIXOS (manifesto e icones) vem da cache e pronto.
+
+   O que NAO se faz: guardar em cache tudo o que passa. Um service worker que
+   guarda tudo acaba a servir versoes velhas de ficheiros que nunca mais se
+   conseguem actualizar.
+
+   Os dados do utilizador nao passam por aqui: vivem na IndexedDB do telemovel.
+   ======================================================================== */
+
+const CACHE = 'treinos-v2';
+
+const FICHEIROS = [
+  './',
+  'index.html',
+  'manifest.json',
+  'icon-180.png',
+  'icon-192.png',
+  'icon-512.png',
+  'icon-512-maskable.png'
+];
+
+self.addEventListener('install', (evento) => {
+  evento.waitUntil(
+    caches.open(CACHE)
+      .then((cache) => cache.addAll(FICHEIROS))
+      // skipWaiting: sem isto, uma versao nova so entra depois de fechar
+      // todos os separadores abertos — e uma app no ecra principal do iPhone
+      // pode ficar semanas sem isso acontecer.
+      .then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener('activate', (evento) => {
+  evento.waitUntil(
+    caches.keys()
+      .then((nomes) => Promise.all(
+        nomes.filter((n) => n !== CACHE).map((n) => caches.delete(n))
+      ))
+      .then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener('fetch', (evento) => {
+  const pedido = evento.request;
+
+  // Guardar um backup e um download, nao um pedido a cachear. E qualquer coisa
+  // que nao seja GET nao tem lugar nenhum numa cache.
+  if (pedido.method !== 'GET') return;
+
+  // Pedidos para fora desta origem tambem nao: a app nao faz nenhum, mas se um
+  // dia fizer, nao e a cache que os deve servir.
+  const url = new URL(pedido.url);
+  if (url.origin !== self.location.origin) return;
+
+  // Abrir a app: serve-se o que esta guardado e vai-se buscar o novo por tras.
+  // So a propria app leva este tratamento: responder index.html a QUALQUER
+  // navegacao da origem faria desaparecer qualquer outra pagina que estivesse
+  // na mesma pasta.
+  const caminho = url.pathname.endsWith('/') ? url.pathname + 'index.html' : url.pathname;
+  if (pedido.mode === 'navigate' && caminho.endsWith('/index.html')) {
+    evento.respondWith(
+      caches.open(CACHE).then((cache) => {
+        const doServidor = fetch(pedido).then((resposta) => {
+          if (resposta && resposta.ok) cache.put('index.html', resposta.clone());
+          return resposta;
+        }).catch(() => null);
+
+        return cache.match('index.html').then((guardado) => {
+          // Sem copia guardada (primeira abertura) espera-se pela rede.
+          return guardado || doServidor;
+        });
+      })
+    );
+    return;
+  }
+
+  // Ficheiros fixos: so os que foram postos na cache de proposito.
+  evento.respondWith(
+    caches.match(pedido).then((guardado) => guardado || fetch(pedido))
+  );
+});
