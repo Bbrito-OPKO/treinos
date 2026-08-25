@@ -135,6 +135,16 @@ bate ao mesmo tempo no peso e nas repetições. Não foi inventado: a regra foi
 medida contra as 1187 séries que o próprio FitNotes já tinha marcado como
 recorde, e bate certo nas 1187, sem nenhuma a mais nem a menos.
 
+**Carga máxima por repetições.** A marca para 8 repetições não é o melhor peso
+feito com exactamente 8: é o melhor peso feito com 8 **ou mais**. Quem faz 10
+com 111,5 kg fez 8 com 111,5 pelo caminho. Por isso a coluna «máx» nunca sobe
+quando as repetições sobem.
+
+**O visto verde.** Uma série pode estar planeada e ainda por fazer — é o que
+acontece quando copias um treino de outro dia. Enquanto não tem o visto, não
+conta para nada: nem recordes, nem volume, nem médias de RIR. Sem isso bastava
+copiar um treino que nunca se fez para inventar um recorde.
+
 **Volume.** Soma de repetições × peso. As séries de peso corporal contam para o
 número de séries mas não somam volume — não se sabe quanto pesavas em cada dia,
 e inventar um valor estragaria o gráfico.

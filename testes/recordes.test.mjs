@@ -12,7 +12,9 @@ import assert from 'node:assert/strict';
 import { nucleo } from './nucleo.mjs';
 import { backup, ESPERADO, SEM_DADOS } from './dados.mjs';
 
-const { detetarRecordes, melhoresPorExercicio, recordesPorReps } = nucleo;
+const { detetarRecordes, melhoresPorExercicio, recordesPorReps, curvaRepMax,
+        melhorPesoParaReps, serieFeita, agregarPorPeriodo, mediaRir,
+        progressaoExercicio } = nucleo;
 
 // Ajuda a escrever series de teste sem ruido.
 let n = 0;
@@ -117,50 +119,149 @@ test('melhoresPorExercicio devolve a melhor marca de sempre', () => {
   assert.equal(m[1].melhorVolumeSerie, 90 * 12);
 });
 
+/* -------------------------------- series por fazer nao contam para nada */
+
+test('uma serie por fazer nao conta como recorde', () => {
+  // Copiar um treino e planear, nao registar. Se as series copiadas
+  // contassem, bastava copiar um treino que nunca se fez para inventar um PR.
+  const feita = serie('2026-01-01', 100, 5);
+  const porFazer = { ...serie('2026-01-08', 200, 5), feita: false };
+  const r = detetarRecordes([feita, porFazer]);
+  assert.equal(r.length, 1, 'so a que foi mesmo feita');
+  assert.equal(r[0].serieId, feita.id);
+});
+
+test('uma serie por fazer nao entra na carga maxima', () => {
+  const t = recordesPorReps([
+    serie('2026-01-01', 100, 5),
+    { ...serie('2026-01-08', 250, 5), feita: false }
+  ], 1);
+  assert.equal(t.find(l => l.reps === 5).peso, 100, '250 kg planeados nao sao 250 kg feitos');
+});
+
+test('uma serie por fazer nao soma volume nem conta como serie', () => {
+  const ex = [{ id: 1, nome: 'Supino', grupo: 'Peito' }];
+  const r = agregarPorPeriodo([
+    { exercicioId: 1, data: '2026-08-24', peso: 100, reps: 5 },
+    { exercicioId: 1, data: '2026-08-24', peso: 100, reps: 5, feita: false }
+  ], ex, { periodo: 'semana' });
+  assert.equal(r[0].total.series, 1);
+  assert.equal(r[0].total.volume, 500);
+});
+
+test('uma serie por fazer nao entra na media de RIR', () => {
+  const r = mediaRir([
+    { exercicioId: 1, data: '2026-08-24', rir: 2 },
+    { exercicioId: 1, data: '2026-08-24', rir: 0, feita: false }
+  ]);
+  assert.equal(r.comRir, 1);
+  assert.equal(r.global, 2);
+});
+
+test('uma serie por fazer nao aparece na progressao', () => {
+  const p = progressaoExercicio([
+    { exercicioId: 1, data: '2026-08-24', peso: 100, reps: 5 },
+    { exercicioId: 1, data: '2026-08-31', peso: 200, reps: 5, feita: false }
+  ], 1);
+  assert.equal(p.length, 1);
+  assert.equal(p[0].pesoMax, 100);
+});
+
+test('sem o campo feita conta como feita', () => {
+  // As 28.747 series que vieram do FitNotes nao trazem o campo.
+  assert.equal(serieFeita({ peso: 100, reps: 5 }), true);
+  assert.equal(serieFeita({ peso: 100, reps: 5, feita: true }), true);
+  assert.equal(serieFeita({ peso: 100, reps: 5, feita: false }), false);
+  assert.equal(serieFeita(null), true, 'nao pode rebentar com nada');
+});
+
+test('dar o visto a uma serie planeada fa-la contar', () => {
+  const planeada = { ...serie('2026-01-08', 200, 5), feita: false };
+  assert.equal(detetarRecordes([serie('2026-01-01', 100, 5), planeada]).length, 1);
+  planeada.feita = true;
+  assert.equal(detetarRecordes([serie('2026-01-01', 100, 5), planeada]).length, 2);
+});
+
 /* ------------------------------------ cargas maximas por repeticoes */
 
-test('carga maxima por reps: uma linha por numero de repeticoes feito', () => {
+test('carga maxima: uma serie longa conta para todas as repeticoes abaixo', () => {
+  // O caso que o Bruno apanhou no Leg Extension: 111,5 kg a 10 repeticoes e
+  // 109 kg a 8. Dizer que a marca das 8 e 109 esta errado — quem fez 10 com
+  // 111,5 fez 8 com 111,5 pelo caminho.
   const t = recordesPorReps([
-    serie('2026-01-01', 100, 5),
-    serie('2026-01-08', 105, 5),    // bate as 5
-    serie('2026-01-15', 90, 10),
-    serie('2026-01-22', 120, 3)
+    serie('2026-01-01', 109, 8),
+    serie('2026-01-08', 111.5, 10)
   ], 1);
-  assert.deepEqual(t.map(l => [l.reps, l.peso]), [[3, 120], [5, 105], [10, 90]]);
-  assert.equal(t.length, 3, 'nao inventa linhas para reps que nunca se fizeram');
+  const oito = t.find(l => l.reps === 8);
+  assert.equal(oito.peso, 111.5, 'as 8 herdam o peso da serie de 10');
+  assert.equal(oito.herdado, true);
+  assert.equal(oito.repsOrigem, 10, 'diz de que serie veio');
+  assert.equal(t.find(l => l.reps === 10).peso, 111.5);
 });
 
-test('carga maxima por reps: nao inventa as repeticoes que faltam', () => {
-  // Fez 5 e 10. Nao pode aparecer nada nas 4, 6, 7, 8 nem 9.
+test('carga maxima: a curva nunca sobe quando as repeticoes sobem', () => {
+  const t = recordesPorReps([
+    serie('2026-01-01', 111.5, 10),
+    serie('2026-01-02', 109, 12),
+    serie('2026-01-03', 50, 20),
+    serie('2026-01-04', 120, 6)
+  ], 1);
+  const pesos = t.map(l => l.peso);
+  for (let i = 1; i < pesos.length; i++) {
+    assert.ok(pesos[i] <= pesos[i - 1],
+      `a ${t[i].reps} reps (${pesos[i]}) nao pode pesar mais do que a ${t[i - 1].reps} (${pesos[i - 1]})`);
+  }
+  // Os numeros do exemplo do Bruno, um a um.
+  assert.equal(t.find(l => l.reps === 6).peso, 120);
+  assert.equal(t.find(l => l.reps === 10).peso, 111.5);
+  assert.equal(t.find(l => l.reps === 12).peso, 109, 'as 12 nao herdam: 111,5 nunca la chegou');
+  assert.equal(t.find(l => l.reps === 20).peso, 50);
+});
+
+test('carga maxima: so aparecem as repeticoes que foram mesmo feitas', () => {
   const t = recordesPorReps([serie('2026-01-01', 100, 5), serie('2026-01-02', 80, 10)], 1);
-  assert.deepEqual(t.map(l => l.reps), [5, 10]);
+  assert.deepEqual(t.map(l => l.reps), [5, 10], 'nao inventa linhas para 6, 7, 8 nem 9');
+  assert.equal(t.find(l => l.reps === 5).peso, 100);
 });
 
-test('carga maxima por reps: marca as linhas que ja foram batidas', () => {
-  // 100 kg x 8 torna sem valor a marca de 95 kg x 5: mais peso E mais reps.
+test('carga maxima: o melhor a N reps ganha ao herdado', () => {
+  // 130 kg a 5 e melhor do que herdar os 100 kg da serie de 10.
   const t = recordesPorReps([
-    serie('2026-01-01', 95, 5),
-    serie('2026-01-08', 100, 8)
+    serie('2026-01-01', 130, 5),
+    serie('2026-01-02', 100, 10)
   ], 1);
-  assert.equal(t.find(l => l.reps === 5).dominada, true);
-  assert.equal(t.find(l => l.reps === 8).dominada, false);
+  assert.equal(t.find(l => l.reps === 5).peso, 130);
+  assert.equal(t.find(l => l.reps === 5).herdado, false);
+  assert.equal(t.find(l => l.reps === 10).peso, 100);
 });
 
-test('carga maxima por reps: o mesmo peso com mais reps tambem domina', () => {
-  const t = recordesPorReps([
-    serie('2026-01-01', 100, 5),
-    serie('2026-01-08', 100, 9)
+test('curvaRepMax: responde a qualquer numero de repeticoes, nao so aos feitos', () => {
+  const c = curvaRepMax([
+    serie('2026-01-01', 111.5, 10),
+    serie('2026-01-02', 50, 20)
   ], 1);
-  assert.equal(t.find(l => l.reps === 5).dominada, true, 'igual no peso e mais reps chega');
+  assert.equal(melhorPesoParaReps(c, 1), 111.5);
+  assert.equal(melhorPesoParaReps(c, 8), 111.5, 'nunca fez 8, mas fez 10 com esse peso');
+  assert.equal(melhorPesoParaReps(c, 10), 111.5);
+  assert.equal(melhorPesoParaReps(c, 15), 50, 'so a serie de 20 chega tao longe');
+  assert.equal(melhorPesoParaReps(c, 20), 50);
+  assert.equal(melhorPesoParaReps(c, 21), null, 'nunca foi tao longe');
+  assert.equal(melhorPesoParaReps(c, 0), null);
+  assert.equal(melhorPesoParaReps(c, null), null);
+  assert.equal(c.maxReps, 20);
 });
 
-test('carga maxima por reps: em empate fica a primeira vez', () => {
+test('carga maxima: em empate fica a serie mais longa', () => {
+  // 100 kg a 5 e a 9. A marca das 5 devia apontar para a de 9, que e a
+  // que mostra mais capacidade.
   const a = { id: 1, exercicioId: 1, data: '2026-01-01', peso: 100, reps: 5 };
-  const b = { id: 2, exercicioId: 1, data: '2026-06-01', peso: 100, reps: 5 };
-  assert.equal(recordesPorReps([b, a], 1)[0].serieId, 1);
+  const b = { id: 2, exercicioId: 1, data: '2026-02-01', peso: 100, reps: 9 };
+  const t = recordesPorReps([a, b], 1);
+  assert.equal(t.find(l => l.reps === 5).repsOrigem, 9);
+  assert.equal(t.find(l => l.reps === 5).serieId, 2);
 });
 
-test('carga maxima por reps: peso corporal e outros exercicios ficam de fora', () => {
+test('carga maxima: peso corporal e outros exercicios ficam de fora', () => {
   const t = recordesPorReps([
     serie('2026-01-01', 0, 20),        // peso corporal: nao ha carga
     serie('2026-01-02', 50, 5, 2),     // outro exercicio
@@ -169,16 +270,47 @@ test('carga maxima por reps: peso corporal e outros exercicios ficam de fora', (
   assert.deepEqual(t.map(l => [l.reps, l.peso]), [[5, 100]]);
 });
 
-test('carga maxima por reps: traz o 1RM estimado de cada linha', () => {
+test('carga maxima: traz o 1RM estimado de cada linha', () => {
   const t = recordesPorReps([serie('2026-01-01', 100, 10)], 1);
-  assert.ok(Math.abs(t[0].rm1 - 133.3333333) < 0.001, '1RM das 10 reps');
+  assert.ok(Math.abs(t[0].rm1 - 133.3333333) < 0.001);
   const uma = recordesPorReps([serie('2026-02-01', 140, 1)], 1);
   assert.equal(uma[0].rm1, 140, 'com 1 rep o 1RM e o proprio peso');
 });
 
-test('carga maxima por reps: sem series devolve lista vazia', () => {
+test('carga maxima: sem series devolve lista vazia', () => {
   assert.deepEqual(recordesPorReps([], 1), []);
   assert.deepEqual(recordesPorReps([serie('2026-01-01', 100, 5, 2)], 1), []);
+  assert.equal(melhorPesoParaReps(curvaRepMax([], 1), 5), null);
+});
+
+test('historico real: a curva do Leg Extension desce sempre', SEM_DADOS, () => {
+  const b = backup();
+  const leg = b.exercicios.find(e => e.nome === 'Leg Extension Machine');
+  assert.ok(leg, 'o Leg Extension Machine tem de existir no historico');
+  const t = recordesPorReps(b.series, leg.id);
+  assert.ok(t.length > 3, 'poucas linhas para conferir');
+  for (let i = 1; i < t.length; i++) {
+    assert.ok(t[i].peso <= t[i - 1].peso,
+      `${t[i].reps} reps a ${t[i].peso} kg depois de ${t[i - 1].reps} reps a ${t[i - 1].peso} kg`);
+  }
+  // As 8 nao podem valer menos do que as 9 nem do que as 10.
+  const p = (n) => (t.find(l => l.reps === n) || {}).peso;
+  if (p(8) && p(10)) assert.ok(p(8) >= p(10), '8 reps: ' + p(8) + ' vs 10 reps: ' + p(10));
+});
+
+test('historico real: a curva desce sempre em todos os exercicios', SEM_DADOS, () => {
+  const b = backup();
+  let verificados = 0;
+  b.exercicios.forEach(e => {
+    const t = recordesPorReps(b.series, e.id);
+    if (t.length < 2) return;
+    verificados++;
+    for (let i = 1; i < t.length; i++) {
+      assert.ok(t[i].peso <= t[i - 1].peso,
+        e.nome + ': ' + t[i].reps + ' reps a ' + t[i].peso + ' kg');
+    }
+  });
+  assert.ok(verificados > 100, 'so ' + verificados + ' exercicios verificados');
 });
 
 /* --------------------------------------------- contra o historico real */

@@ -165,7 +165,7 @@ a{color:var(--azul)}
   border:1px solid var(--borda);font-weight:650;font-size:16px;color:var(--suave)}
 .rir-escolha button.on{background:var(--azul);border-color:var(--azul);color:#fff}
 
-/* Serie ja registada */
+/* Serie ja registada, so de leitura */
 .serie{display:flex;align-items:center;gap:10px;padding:11px 12px;
   border-bottom:1px solid var(--borda)}
 .serie:last-child{border-bottom:0}
@@ -173,6 +173,37 @@ a{color:var(--azul)}
   font-size:12.5px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:none}
 .serie .v{font-size:17px;font-weight:600;font-variant-numeric:tabular-nums}
 .serie.recorde .n{background:rgba(245,158,11,.2);color:var(--ambar)}
+
+/* Serie editavel: peso, reps, o visto de feito, o RIR e a marca a bater.
+   Em grelha e nao em flex para as colunas ficarem alinhadas de linha
+   para linha, que e o que faz a lista poder ser lida de relance. */
+.linhas-cab,.serie-ed{display:grid;
+  grid-template-columns:20px minmax(52px,1fr) 10px minmax(40px,.7fr) 38px 42px minmax(44px,auto);
+  gap:5px;align-items:center}
+.linhas-cab{padding:6px 12px 4px;font-size:10.5px;font-weight:700;color:var(--fraco);
+  text-transform:uppercase;letter-spacing:.04em}
+.linhas-cab span{text-align:center}
+.linhas-cab span:first-child{text-align:left}
+.serie-ed{padding:7px 12px;border-bottom:1px solid var(--borda)}
+.serie-ed:last-child{border-bottom:0}
+.serie-ed .n{font-size:12.5px;font-weight:700;color:var(--fraco);text-align:center}
+.serie-ed .x{text-align:center;color:var(--fraco);font-size:13px}
+.serie-ed input{width:100%;background:var(--sup2);border:1px solid var(--borda);
+  border-radius:8px;padding:8px 4px;min-height:42px;text-align:center;outline:none;
+  font-size:16px;font-weight:600;font-variant-numeric:tabular-nums;-moz-appearance:textfield}
+.serie-ed input::-webkit-outer-spin-button,.serie-ed input::-webkit-inner-spin-button{
+  -webkit-appearance:none;margin:0}
+.serie-ed input:focus{border-color:var(--azul)}
+.serie-ed input.rir{font-size:15px;color:var(--suave)}
+.serie-ed .feito{min-height:42px;border-radius:8px;border:1.5px solid var(--borda);
+  background:var(--sup2);color:var(--fraco);font-size:17px;font-weight:700;
+  display:flex;align-items:center;justify-content:center}
+.serie-ed .feito.on{background:var(--verde);border-color:var(--verde);color:#04240f}
+.serie-ed .marca{text-align:right;font-size:13px;font-weight:600;color:var(--ambar);
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+.serie-ed .marca.nada{color:var(--fraco);font-weight:400}
+.serie-ed.porfazer input,.serie-ed.porfazer .n{opacity:.62}
+.serie-ed.recorde .n{color:var(--ambar)}
 
 /* ---------------------------------------------------------------------------
    5. Cronometro de descanso (barra que sobe acima dos separadores)
@@ -321,6 +352,21 @@ a{color:var(--azul)}
    nem na base de dados. Os testes em testes/ extraem exactamente este bloco e
    correm-no em Node. Se mexeres aqui, corre `node --test testes/`.
    ======================================================================== */
+
+/* --------------------------------------------------------------------------
+   Series feitas e series por fazer
+
+   Um treino copiado de outro dia entra como PLANO: as series ficam com
+   feita = false ate levarem o visto verde. Enquanto estao por fazer nao podem
+   contar para nada — nem recordes, nem volume, nem medias de RIR. Seria a
+   forma mais facil de estragar seis anos de historico: bastava copiar um
+   treino e nunca o fazer.
+
+   Sem o campo (as 28.747 series do FitNotes) conta como feita: nao ha razao
+   nenhuma para pôr em duvida o que ja esta registado.
+   ----------------------------------------------------------------------- */
+
+function serieFeita(s) { return !s || s.feita !== false; }
 
 /* --------------------------------------------------------------------------
    1RM teorico
@@ -840,7 +886,7 @@ function _ordemCronologica(a, b) {
 
 function detetarRecordes(series) {
   var uteis = series.filter(function (s) {
-    return Number.isFinite(s.peso) && Number.isFinite(s.reps) && s.reps >= 1;
+    return serieFeita(s) && Number.isFinite(s.peso) && Number.isFinite(s.reps) && s.reps >= 1;
   }).sort(_ordemCronologica);
 
   var melhorDesde = {};    // exercicio -> por n.o de reps, melhor peso com reps >= esse
@@ -878,6 +924,7 @@ function detetarRecordes(series) {
 function melhoresPorExercicio(series) {
   var por = {};
   series.forEach(function (s) {
+    if (!serieFeita(s)) return;
     if (!Number.isFinite(s.peso) || !Number.isFinite(s.reps) || s.reps < 1) return;
     var m = por[s.exercicioId] || (por[s.exercicioId] = {
       exercicioId: s.exercicioId, pesoMax: null, serieDoPesoMax: null,
@@ -897,42 +944,86 @@ function melhoresPorExercicio(series) {
 /* --------------------------------------------------------------------------
    Cargas maximas por numero de repeticoes
 
-   Para cada numero de repeticoes, o peso mais alto que la foi levantado. So
-   entram os numeros de repeticoes que foram mesmo feitos: inventar uma linha
-   para as 4 repeticoes so porque ha uma de 5 seria dar por feito o que nao
-   aconteceu.
+   A carga maxima para N repeticoes NAO e o melhor peso feito com exactamente
+   N repeticoes. E o melhor peso feito com N repeticoes OU MAIS.
 
-   Uma linha fica marcada como 'dominada' quando ja houve uma serie com MAIS
-   repeticoes e pelo menos o mesmo peso. Nesse caso a marca das repeticoes
-   mais baixas nao vale nada — e so sinal de nunca la se ter ido a serio.
+   O porque, com um caso real do historico: no Leg Extension houve 111,5 kg a
+   10 repeticoes e 109 kg a 8. Dizer que a marca das 8 e 109 kg esta errado —
+   quem fez 10 com 111,5 fez 8 com 111,5 pelo caminho. A marca das 8 e 111,5.
+
+   Ja as 12 ficam mesmo em 109, porque nunca la houve 111,5 com 12 ou mais.
+   Por isso a curva desce sempre (ou fica igual) a medida que as repeticoes
+   sobem, que e como o corpo funciona.
    ----------------------------------------------------------------------- */
 
-function recordesPorReps(series, exercicioId) {
-  var melhor = {};
-  series.forEach(function (s) {
-    if (s.exercicioId !== exercicioId) return;
-    if (!Number.isFinite(s.peso) || !Number.isFinite(s.reps) || s.reps < 1) return;
-    if (s.peso <= 0) return;
-    var atual = melhor[s.reps];
-    // Em caso de empate no peso fica a mais antiga: foi essa que o conseguiu
-    // primeiro.
-    if (!atual || s.peso > atual.peso || (s.peso === atual.peso && s.data < atual.data)) {
-      melhor[s.reps] = { reps: s.reps, peso: s.peso, data: s.data, serieId: s.id };
+/* A curva completa: pesos[n] e o melhor peso levantado com n repeticoes ou
+   mais. Fica com um buraco (undefined) nas repeticoes acima da serie mais
+   longa que ja se fez. */
+function curvaRepMax(series, exercicioId) {
+  var uteis = series.filter(function (s) {
+    return s.exercicioId === exercicioId && serieFeita(s) &&
+      Number.isFinite(s.peso) && s.peso > 0 &&
+      Number.isFinite(s.reps) && s.reps >= 1;
+  });
+  if (!uteis.length) return { pesos: [], origem: [], maxReps: 0, repsFeitas: [] };
+
+  var maxReps = uteis.reduce(function (m, s) { return Math.max(m, s.reps); }, 0);
+  var pesos = new Array(maxReps + 1);
+  var origem = new Array(maxReps + 1);
+
+  uteis.forEach(function (s) {
+    // Uma serie de N repeticoes conta para N e para todas as abaixo.
+    for (var n = 1; n <= s.reps; n++) {
+      var atual = pesos[n];
+      if (atual === undefined || s.peso > atual) {
+        pesos[n] = s.peso;
+        origem[n] = s;
+      } else if (s.peso === atual && origem[n]) {
+        // Empate no peso: fica a serie mais longa, e entre iguais a mais
+        // antiga — foi essa que a marca custou primeiro.
+        if (s.reps > origem[n].reps ||
+            (s.reps === origem[n].reps && s.data < origem[n].data)) {
+          origem[n] = s;
+        }
+      }
     }
   });
 
-  var linhas = Object.keys(melhor).map(function (k) { return melhor[k]; })
-    .sort(function (a, b) { return a.reps - b.reps; });
-
-  linhas.forEach(function (linha) {
-    linha.dominada = linhas.some(function (outra) {
-      return outra.reps > linha.reps && outra.peso >= linha.peso;
-    });
-    var est = estimar1RM(linha.peso, linha.reps);
-    linha.rm1 = est ? est.media : null;
+  var repsFeitas = [];
+  uteis.forEach(function (s) {
+    if (repsFeitas.indexOf(s.reps) === -1) repsFeitas.push(s.reps);
   });
+  repsFeitas.sort(function (a, b) { return a - b; });
 
-  return linhas;
+  return { pesos: pesos, origem: origem, maxReps: maxReps, repsFeitas: repsFeitas };
+}
+
+/* O peso a bater para um dado numero de repeticoes. */
+function melhorPesoParaReps(curva, reps) {
+  if (!curva || !Number.isFinite(reps) || reps < 1) return null;
+  var p = curva.pesos[reps];
+  return p === undefined ? null : p;
+}
+
+/* Uma linha por numero de repeticoes que ja foi feito, com o valor da curva.
+   Nao se inventam linhas para repeticoes que nunca se fizeram. */
+function recordesPorReps(series, exercicioId) {
+  var curva = curvaRepMax(series, exercicioId);
+  return curva.repsFeitas.map(function (n) {
+    var s = curva.origem[n];
+    var est = estimar1RM(curva.pesos[n], n);
+    return {
+      reps: n,
+      peso: curva.pesos[n],
+      data: s ? s.data : null,
+      serieId: s ? s.id : null,
+      // Quando o valor veio de uma serie mais longa, diz-se de qual: senao a
+      // data ao lado do numero parecia de uma serie que nao existiu.
+      repsOrigem: s ? s.reps : n,
+      herdado: !!(s && s.reps > n),
+      rm1: est ? est.media : null
+    };
+  });
 }
 
 /* --------------------------------------------------------------------------
@@ -951,7 +1042,7 @@ function agregarPorPeriodo(series, exercicios, opcoes) {
 
   var baldes = {};
   series.forEach(function (s) {
-    if (!s.data) return;
+    if (!s.data || !serieFeita(s)) return;
     if (opcoes.de && s.data < opcoes.de) return;
     if (opcoes.ate && s.data > opcoes.ate) return;
     var chave = periodo === 'mes' ? chaveMes(s.data) : chaveSemanaIso(s.data);
@@ -980,7 +1071,7 @@ function agregarPorPeriodo(series, exercicios, opcoes) {
 function mediaRir(series) {
   var porData = {}, porExercicio = {}, soma = 0, n = 0;
   series.forEach(function (s) {
-    if (!Number.isFinite(s.rir)) return;
+    if (!serieFeita(s) || !Number.isFinite(s.rir)) return;
     soma += s.rir; n++;
     var d = porData[s.data] || (porData[s.data] = { data: s.data, soma: 0, n: 0 });
     d.soma += s.rir; d.n++;
@@ -1004,7 +1095,7 @@ function mediaRir(series) {
 function progressaoExercicio(series, exercicioId) {
   var porDia = {};
   series.forEach(function (s) {
-    if (s.exercicioId !== exercicioId || !s.data) return;
+    if (s.exercicioId !== exercicioId || !s.data || !serieFeita(s)) return;
     var d = porDia[s.data] || (porDia[s.data] = {
       data: s.data, pesoMax: null, melhor1RM: null, volume: 0, series: 0, reps: 0,
       somaRir: 0, comRir: 0
@@ -1160,6 +1251,22 @@ var BD = (function () {
       });
     },
 
+    /* Apaga muitos registos numa transacao so, pela mesma razao que
+       guardarMuitos: mil transacoes separadas sao mil idas ao ciclo de
+       eventos, e apagar um exercicio pode levar mil e duzentas series. */
+    apagarMuitos: function (loja, chaves) {
+      if (!chaves || !chaves.length) return Promise.resolve(0);
+      return transacao([loja], 'readwrite').then(function (t) {
+        var armazem = t.objectStore(loja);
+        return new Promise(function (resolve, reject) {
+          t.oncomplete = function () { resolve(chaves.length); };
+          t.onerror = function () { reject(t.error); };
+          t.onabort = function () { reject(t.error); };
+          for (var i = 0; i < chaves.length; i++) armazem.delete(chaves[i]);
+        });
+      });
+    },
+
     limpar: function (lojas) {
       return transacao(lojas, 'readwrite').then(function (t) {
         lojas.forEach(function (l) { t.objectStore(l).clear(); });
@@ -1215,6 +1322,7 @@ function reindexar() {
   Estado.exercicios.forEach(function (e) { Estado._porId[e.id] = e; });
   Estado._recordes = null;
   Estado._melhores = null;
+  Estado._curvas = null;
 }
 
 function exercicioPorId(id) { return Estado._porId[id] || null; }
@@ -1377,9 +1485,11 @@ var CORES_GRUPO = {
   'Peito': '#3b82f6',
   'Costas': '#22c55e',
   'Pernas': '#f59e0b',
-  'Ombros': '#a855f7',
+  'Ombros': '#06b6d4',
   'Bíceps': '#ef4444',
-  'Tríceps': '#14b8a6',
+  // Lima e nao teal: o teal ficava a 17 graus do ciano dos Ombros e as duas
+  // barras eram indistinguiveis num grafico empilhado.
+  'Tríceps': '#84cc16',
   'Abdominais': '#eab308',
   'Cardio': '#ec4899',
   'Outros': '#64748b'
@@ -1733,8 +1843,10 @@ function renderDia() {
           '<div class="mini fraco">' + esc(grupo) + ' · ' + plural(bloco.series.length, 'série', 'séries') + '</div></div>' +
           '<span class="seta">&#8250;</span>' +
         '</button>';
+      var tipoBloco = tipoDoExercicio(e);
+      html += cabecalhoDasLinhas(tipoBloco);
       bloco.series.forEach(function (s, i) {
-        html += linhaDeSerie(s, i + 1, prs[s.id]);
+        html += linhaEditavel(s, i + 1, prs[s.id], tipoBloco);
       });
       html += '</div>';
     });
@@ -1750,11 +1862,18 @@ function renderDia() {
       'Copiar treino de outro dia</button>';
   }
 
+  if (series.length) {
+    html += '<button class="btn perigo larga" id="btApagarDia" style="margin-top:8px">' +
+      'Apagar o treino deste dia</button>';
+  }
+
   $('#v-treino').innerHTML = html;
 
   $('#btAddEx').onclick = function () { escolherExercicio(); };
   var copiar = $('#btCopiar');
   if (copiar) copiar.onclick = escolherTreinoParaCopiar;
+  var apagarDia = $('#btApagarDia');
+  if (apagarDia) apagarDia.onclick = function () { apagarTreinoDoDia(data); };
   Array.prototype.forEach.call(document.querySelectorAll('[data-abrir-ex]'), function (b) {
     b.onclick = function () {
       Estado.exercicioAtivo = +b.dataset.abrirEx;
@@ -1762,6 +1881,7 @@ function renderDia() {
     };
   });
   ligarLinhasDeSerie();
+  ligarLinhasEditaveis();
 }
 
 function linhaDeSerie(s, n, pr) {
@@ -1777,6 +1897,132 @@ function linhaDeSerie(s, n, pr) {
     '</div>';
 }
 
+
+/* --------------------------------------------------------------------------
+   Linhas de serie editaveis
+
+   Uma serie pode estar planeada mas ainda por fazer — e o que acontece quando
+   se copia um treino de outro dia. O visto verde e o que diz "foi mesmo isto
+   que fiz". Series antigas e series gravadas a serio entram ja com o visto.
+
+   Sem o campo 'feita' (as series do historico) conta como feita: nao ha
+   nenhuma razao para pôr em duvida seis anos de registos.
+   ----------------------------------------------------------------------- */
+
+var estaFeita = serieFeita;   // o nucleo e que manda na regra
+
+/* Curva de carga maxima por exercicio, guardada enquanto os dados nao mudam.
+   Sem isto, desenhar um dia com 20 series varria as 28.747 series 20 vezes. */
+function curvaDe(exercicioId) {
+  if (!Estado._curvas) Estado._curvas = {};
+  if (!Estado._curvas[exercicioId]) {
+    Estado._curvas[exercicioId] = curvaRepMax(Estado.series, exercicioId);
+  }
+  return Estado._curvas[exercicioId];
+}
+
+function cabecalhoDasLinhas(tipo) {
+  if (tipo !== 'peso_reps') return '';
+  return '<div class="linhas-cab">' +
+    '<span></span><span>kg</span><span></span><span>reps</span>' +
+    '<span>feito</span><span>RIR</span><span>máx</span></div>';
+}
+
+function linhaEditavel(s, n, pr, tipo) {
+  if (tipo !== 'peso_reps') {
+    // Cardio e isometricos nao tem peso nem repeticoes para editar aqui;
+    // continuam a abrir a folha de edicao ao toque.
+    return linhaDeSerie(s, n, pr);
+  }
+
+  var marca = melhorPesoParaReps(curvaDe(s.exercicioId), s.reps);
+  var feita = estaFeita(s);
+
+  return '<div class="serie-ed' + (feita ? '' : ' porfazer') + (pr ? ' recorde' : '') +
+      '" data-linha="' + s.id + '">' +
+    '<div class="n">' + n + '</div>' +
+    '<input type="number" inputmode="decimal" step="any" data-campo="peso" value="' +
+      (Number.isFinite(s.peso) ? s.peso : '') + '" aria-label="peso">' +
+    '<div class="x">×</div>' +
+    '<input type="number" inputmode="numeric" data-campo="reps" value="' +
+      (Number.isFinite(s.reps) ? s.reps : '') + '" aria-label="repetições">' +
+    '<button class="feito' + (feita ? ' on' : '') + '" data-campo="feita" ' +
+      'aria-label="marcar como feita">✓</button>' +
+    '<input type="number" inputmode="numeric" class="rir" min="0" max="10" ' +
+      'data-campo="rir" placeholder="—" value="' +
+      (Number.isFinite(s.rir) ? s.rir : '') + '" aria-label="RIR">' +
+    '<div class="marca' + (marca === null ? ' nada' : '') + '" data-campo="marca">' +
+      (marca === null ? '—' : num(marca)) + '</div>' +
+    '</div>';
+}
+
+/* Liga os campos das linhas editaveis. Grava a cada alteracao: nao ha botao
+   de guardar de proposito, para nao haver forma de perder uma serie por se
+   ter saido do ecra sem carregar em nada. */
+function ligarLinhasEditaveis() {
+  Array.prototype.forEach.call(document.querySelectorAll('[data-linha]'), function (linha) {
+    var id = +linha.dataset.linha;
+    var s = Estado.series.find(function (x) { return x.id === id; });
+    if (!s) return;
+
+    function guardar(redesenhar) {
+      reindexar();
+      BD.guardar('series', s).then(function () { if (redesenhar) render(); });
+    }
+
+    function actualizarMarca() {
+      var alvo = linha.querySelector('[data-campo="marca"]');
+      var marca = melhorPesoParaReps(curvaDe(s.exercicioId), s.reps);
+      alvo.textContent = marca === null ? '—' : num(marca);
+      alvo.classList.toggle('nada', marca === null);
+    }
+
+    linha.querySelector('[data-campo="peso"]').onchange = function () {
+      var v = parseFloat(this.value);
+      s.peso = Number.isFinite(v) ? v : 0;
+      this.value = s.peso;
+      guardar(false);
+    };
+
+    linha.querySelector('[data-campo="reps"]').onchange = function () {
+      var v = parseInt(this.value, 10);
+      s.reps = Number.isFinite(v) && v > 0 ? v : null;
+      this.value = s.reps === null ? '' : s.reps;
+      guardar(false);
+      actualizarMarca();
+    };
+
+    linha.querySelector('[data-campo="rir"]').onchange = function () {
+      var t = this.value.trim();
+      var v = parseFloat(t);
+      s.rir = t === '' || !Number.isFinite(v) ? null : Math.max(0, Math.min(10, v));
+      this.value = s.rir === null ? '' : s.rir;
+      guardar(false);
+    };
+
+    linha.querySelector('[data-campo="feita"]').onclick = function () {
+      s.feita = !estaFeita(s);
+      this.classList.toggle('on', s.feita);
+      linha.classList.toggle('porfazer', !s.feita);
+      vibrar(s.feita ? 15 : 8);
+      // Ao dar por feita uma serie ela passa a contar para os recordes e para
+      // o volume, por isso o ecra tem de ser refeito. Mas a posicao da lista
+      // e guardada: confirmar quinze series a uma e a saltar para o topo de
+      // cada vez seria insuportavel.
+      var posicao = window.scrollY;
+      reindexar();
+      BD.guardar('series', s).then(function () {
+        render();
+        window.scrollTo(0, posicao);
+      });
+      if (s.feita) {
+        var pr = recordes()[s.id];
+        if (pr) { avisar('Recorde! ' + nomeDoRecorde(pr)); vibrar([60, 40, 60, 40, 120]); }
+      }
+    };
+  });
+}
+
 function nomeDoRecorde(pr) {
   if (pr.tipos.indexOf('peso') !== -1) return 'PR peso';
   if (pr.tipos.indexOf('1rm') !== -1) return 'PR 1RM';
@@ -1787,6 +2033,36 @@ function ligarLinhasDeSerie() {
   Array.prototype.forEach.call(document.querySelectorAll('[data-serie]'), function (el) {
     el.onclick = function () { editarSerie(+el.dataset.serie); };
   });
+}
+
+/* Apaga o treino todo de um dia: as series e a propria sessao. */
+function apagarTreinoDoDia(data) {
+  var series = seriesDoDia(data);
+  if (!series.length) { avisar('Não há nada para apagar neste dia'); return; }
+
+  var exercicios = new Set(series.map(function (s) { return s.exercicioId; })).size;
+
+  confirmar('Apagar o treino de ' + dataLonga(data),
+    'Vai apagar ' + plural(series.length, 'série', 'séries') + ' de ' +
+    plural(exercicios, 'exercício', 'exercícios') + '. Isto não se desfaz — ' +
+    'se tiveres dúvidas, guarda antes um backup em Exercícios › Dados.',
+    'Apagar o dia', function () {
+      var ids = series.map(function (s) { return s.id; });
+      var sessoes = Estado.sessoes.filter(function (x) { return x.data === data; });
+
+      Estado.series = Estado.series.filter(function (s) { return s.data !== data; });
+      Estado.sessoes = Estado.sessoes.filter(function (x) { return x.data !== data; });
+      reindexar();
+
+      Promise.all([
+        BD.apagarMuitos('series', ids),
+        BD.apagarMuitos('sessoes', sessoes.map(function (x) { return x.id; }))
+      ]).then(function () {
+        avisar(plural(ids.length, 'série apagada', 'séries apagadas'));
+        Estado.exercicioAtivo = null;
+        render();
+      });
+    });
 }
 
 /* Todos os dias em que houve treino, do mais recente para tras. */
@@ -1970,7 +2246,10 @@ function copiarTreino(deData) {
           ordemExercicio: s.ordemExercicio + desvioEx,
           ordem: s.ordem + desvioOrdem,
           peso: s.peso, reps: s.reps, rir: null,
-          tempoSeg: s.tempoSeg, distancia: s.distancia, supersetId: null, nota: null
+          tempoSeg: s.tempoSeg, distancia: s.distancia, supersetId: null, nota: null,
+          // Um treino copiado e um plano, nao um registo. As series entram
+          // por fazer e so contam para as marcas depois do visto verde.
+          feita: false
         };
       });
       Estado.series = Estado.series.concat(novas);
@@ -2098,8 +2377,9 @@ function renderRegisto() {
 
   if (hoje.length) {
     html += '<div class="lista"><div class="cab">Hoje · ' +
-      plural(hoje.length, 'série', 'séries') + '</div>';
-    hoje.forEach(function (s, i) { html += linhaDeSerie(s, i + 1, prs[s.id]); });
+      plural(hoje.length, 'série', 'séries') + '</div>' +
+      cabecalhoDasLinhas(tipo);
+    hoje.forEach(function (s, i) { html += linhaEditavel(s, i + 1, prs[s.id], tipo); });
     html += '</div>';
   }
 
@@ -2125,7 +2405,6 @@ function renderRegisto() {
       '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
         m.totalSeries + '</div><div class="mini fraco">séries feitas</div></div>' +
       '</div></div>';
-    html += htmlTabelaRepMax(e.id);
   } else if (tipo !== 'peso_reps' && todas.length) {
     var maisLongo = todas.reduce(function (a, s) {
       return (Number.isFinite(s.tempoSeg) && (!a || s.tempoSeg > a.tempoSeg)) ? s : a;
@@ -2142,6 +2421,7 @@ function renderRegisto() {
   $('#v-treino').innerHTML = html;
   ligarRegisto(e, rirInicial);
   ligarLinhasDeSerie();
+  ligarLinhasEditaveis();
 }
 
 function passoNumerico(id, rotulo, valor, modo, passo) {
@@ -2168,29 +2448,31 @@ function htmlTabelaRepMax(exercicioId) {
   if (!linhas.length) return '';
 
   var maiorPeso = Math.max.apply(null, linhas.map(function (l) { return l.peso; }));
-  var temDominadas = linhas.some(function (l) { return l.dominada; });
+  var temHerdadas = linhas.some(function (l) { return l.herdado; });
 
   return '<div class="cartao"><h3>Carga máxima por repetições</h3>' +
     '<div class="lista" style="margin:0">' +
     linhas.map(function (l) {
       var largura = Math.max(4, l.peso / maiorPeso * 100);
-      return '<button class="item" data-serie="' + l.serieId + '"' +
-        (l.dominada ? ' style="opacity:.45"' : '') + '>' +
+      return '<button class="item" data-serie="' + l.serieId + '">' +
         '<span class="nums suave" style="width:44px;flex:none;font-weight:600">' +
           l.reps + '×</span>' +
         '<div class="crescer">' +
           '<div style="height:6px;background:var(--sup3);border-radius:99px;overflow:hidden">' +
             '<div style="height:100%;width:' + largura.toFixed(1) + '%;background:var(--ambar);' +
             'border-radius:99px"></div></div>' +
-          '<div class="mini fraco" style="margin-top:3px">' + esc(dataLonga(l.data)) +
+          '<div class="mini fraco" style="margin-top:3px">' +
+            (l.herdado ? 'de uma série de ' + l.repsOrigem + ' · ' : '') +
+            esc(l.data ? dataLonga(l.data) : '') +
             (l.rm1 ? ' · 1RM ~' + kg(l.rm1) : '') + '</div>' +
         '</div>' +
         '<span class="nums" style="font-weight:700;flex:none">' + kg(l.peso) + '</span>' +
         '</button>';
     }).join('') + '</div>' +
-    (temDominadas
-      ? '<p class="mini fraco" style="margin:10px 0 0">As linhas esbatidas já foram ' +
-        'batidas por séries com mais repetições e pelo menos o mesmo peso.</p>'
+    (temHerdadas
+      ? '<p class="mini fraco" style="margin:10px 0 0">Quem faz 10 repetições com um peso ' +
+        'fez 8 com esse peso pelo caminho. Por isso há linhas cuja marca vem de uma série ' +
+        'mais longa.</p>'
       : '') +
     '</div>';
 }
@@ -2799,7 +3081,7 @@ function analiseExercicio(corpo) {
   var comRir = pontos.filter(function (p) { return p.rirMedio !== null; });
   if (comRir.length > 1) {
     html += '<div class="cartao"><h3>RIR médio por treino</h3>' +
-      grafLinhas([{ nome: 'RIR', cor: '#a855f7',
+      grafLinhas([{ nome: 'RIR', cor: '#06b6d4',
         pontos: comRir.map(function (p) { return { x: p.data, y: p.rirMedio }; }) }],
         { altura: 200, titulo: 'Esforço em ' + e.nome }) +
       '<p class="mini fraco" style="margin:10px 0 0">Mais baixo é mais perto da falha.</p></div>';
@@ -2859,7 +3141,7 @@ function analiseEsforco(corpo) {
 
   var recentes = rir.porSessao.slice(-60);
   var html = '<div class="cartao"><h3>RIR médio por treino</h3>' +
-    grafLinhas([{ nome: 'RIR médio', cor: '#a855f7',
+    grafLinhas([{ nome: 'RIR médio', cor: '#06b6d4',
       pontos: recentes.map(function (s) { return { x: s.data, y: s.media }; }) }],
       { titulo: 'Esforço ao longo do tempo' }) +
     '<p class="mini fraco" style="margin:10px 0 0">Mais baixo é mais perto da falha. ' +
@@ -3004,8 +3286,10 @@ function fichaExercicio(id) {
         pontos: pontos.filter(function (p) { return p.pesoMax !== null; })
           .map(function (p) { return { x: p.data, y: p.pesoMax }; }) }],
         { altura: 200, desdeZero: false }) + '</div>' : '') +
+    htmlTabelaRepMax(id) +
     '<button class="btn primaria larga" id="fRegistar">Registar série hoje</button>' +
-    '<button class="btn larga" id="fEditar" style="margin-top:8px">Editar exercício</button>',
+    '<button class="btn larga" id="fEditar" style="margin-top:8px">Editar exercício</button>' +
+    '<button class="btn perigo larga" id="fApagar" style="margin-top:8px">Apagar exercício</button>',
     function (corpo) {
       corpo.querySelector('#fRegistar').onclick = function () {
         fecharFolha();
@@ -3014,6 +3298,38 @@ function fichaExercicio(id) {
         trocarVista('treino');
       };
       corpo.querySelector('#fEditar').onclick = function () { editarExercicio(id); };
+      corpo.querySelector('#fApagar').onclick = function () { apagarExercicio(id); };
+      ligarLinhasDeSerie();
+    });
+}
+
+/* Apaga um exercicio e tudo o que ele tem registado. Chamado da ficha do
+   exercicio e do ecra de editar — antes so estava enterrado no segundo. */
+function apagarExercicio(id) {
+  var e = exercicioPorId(id);
+  if (!e) return;
+  var apagadas = seriesDoExercicio(id);
+  fecharFolha();
+
+  confirmar('Apagar ' + e.nome,
+    apagadas.length
+      ? 'Este exercício tem ' + plural(apagadas.length, 'série registada', 'séries registadas') +
+        '. Apagar leva as séries também, e isso não se desfaz. Se tiveres dúvidas, ' +
+        'guarda antes um backup em Exercícios › Dados.'
+      : 'Não tem nenhuma série registada.',
+    'Apagar', function () {
+      Estado.exercicios = Estado.exercicios.filter(function (x) { return x.id !== id; });
+      Estado.series = Estado.series.filter(function (s) { return s.exercicioId !== id; });
+      reindexar();
+      Promise.all([
+        BD.apagar('exercicios', id),
+        BD.apagarMuitos('series', apagadas.map(function (s) { return s.id; }))
+      ]).then(function () {
+        avisar(e.nome + ' apagado');
+        if (Estado.exercicioAtivo === id) Estado.exercicioAtivo = null;
+        if (Estado.exercicioAnalise === id) Estado.exercicioAnalise = null;
+        render();
+      });
     });
 }
 
@@ -3062,25 +3378,7 @@ function editarExercicio(id) {
         });
       };
       var apagar = corpo.querySelector('#xApagar');
-      if (apagar) {
-        apagar.onclick = function () {
-          var n = seriesDoExercicio(id).length;
-          fecharFolha();
-          confirmar('Apagar ' + e.nome,
-            n ? 'Este exercício tem ' + n + ' séries registadas. Apagar leva as séries também, ' +
-                'e isso não se desfaz.'
-              : 'Não tem nenhuma série registada.',
-            'Apagar', function () {
-              Estado.exercicios = Estado.exercicios.filter(function (x) { return x.id !== id; });
-              var apagadas = Estado.series.filter(function (s) { return s.exercicioId === id; });
-              Estado.series = Estado.series.filter(function (s) { return s.exercicioId !== id; });
-              reindexar();
-              Promise.all([BD.apagar('exercicios', id)]
-                .concat(apagadas.map(function (s) { return BD.apagar('series', s.id); })))
-                .then(function () { avisar('Apagado'); render(); });
-            });
-        };
-      }
+      if (apagar) apagar.onclick = function () { apagarExercicio(id); };
     });
 }
 
