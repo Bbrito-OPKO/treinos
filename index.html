@@ -229,6 +229,10 @@ a{color:var(--azul)}
 .calendario button.fora{background:none;color:var(--fraco);opacity:.4}
 .calendario button.treino{background:var(--azul);color:#fff;font-weight:650}
 .calendario button.hoje{outline:2px solid var(--ambar);outline-offset:-2px}
+/* O dia escolhido para copiar: verde, e a ganhar ao contorno de hoje. */
+.calendario button.sel{background:var(--verde);color:#04240f;font-weight:700;
+  outline:2px solid var(--verde);outline-offset:2px}
+.calendario button[disabled]{opacity:.35}
 
 .selseg{display:flex;background:var(--sup2);border-radius:10px;padding:3px;gap:3px;margin-bottom:14px}
 .selseg button{flex:1;min-height:36px;border-radius:8px;font-size:14px;font-weight:600;
@@ -888,6 +892,47 @@ function melhoresPorExercicio(series) {
     if (m.melhorVolumeSerie === null || vol > m.melhorVolumeSerie) m.melhorVolumeSerie = vol;
   });
   return por;
+}
+
+/* --------------------------------------------------------------------------
+   Cargas maximas por numero de repeticoes
+
+   Para cada numero de repeticoes, o peso mais alto que la foi levantado. So
+   entram os numeros de repeticoes que foram mesmo feitos: inventar uma linha
+   para as 4 repeticoes so porque ha uma de 5 seria dar por feito o que nao
+   aconteceu.
+
+   Uma linha fica marcada como 'dominada' quando ja houve uma serie com MAIS
+   repeticoes e pelo menos o mesmo peso. Nesse caso a marca das repeticoes
+   mais baixas nao vale nada — e so sinal de nunca la se ter ido a serio.
+   ----------------------------------------------------------------------- */
+
+function recordesPorReps(series, exercicioId) {
+  var melhor = {};
+  series.forEach(function (s) {
+    if (s.exercicioId !== exercicioId) return;
+    if (!Number.isFinite(s.peso) || !Number.isFinite(s.reps) || s.reps < 1) return;
+    if (s.peso <= 0) return;
+    var atual = melhor[s.reps];
+    // Em caso de empate no peso fica a mais antiga: foi essa que o conseguiu
+    // primeiro.
+    if (!atual || s.peso > atual.peso || (s.peso === atual.peso && s.data < atual.data)) {
+      melhor[s.reps] = { reps: s.reps, peso: s.peso, data: s.data, serieId: s.id };
+    }
+  });
+
+  var linhas = Object.keys(melhor).map(function (k) { return melhor[k]; })
+    .sort(function (a, b) { return a.reps - b.reps; });
+
+  linhas.forEach(function (linha) {
+    linha.dominada = linhas.some(function (outra) {
+      return outra.reps > linha.reps && outra.peso >= linha.peso;
+    });
+    var est = estimar1RM(linha.peso, linha.reps);
+    linha.rm1 = est ? est.media : null;
+  });
+
+  return linhas;
 }
 
 /* --------------------------------------------------------------------------
@@ -1720,16 +1765,10 @@ function renderDia() {
 }
 
 function linhaDeSerie(s, n, pr) {
-  var texto;
-  if (Number.isFinite(s.reps) && Number.isFinite(s.peso)) {
-    texto = (s.peso > 0 ? num(s.peso) + ' kg' : 'corpo') + ' × ' + s.reps;
-  } else if (Number.isFinite(s.tempoSeg)) {
-    texto = duracaoCurta(s.tempoSeg) + (s.peso > 0 ? ' com ' + num(s.peso) + ' kg' : '');
-  } else if (Number.isFinite(s.distancia)) {
-    texto = num(s.distancia, 2) + ' m';
-  } else {
-    texto = '—';
-  }
+  // O tipo vem do exercicio e nao dos valores da serie: no historico do
+  // FitNotes as series de cardio trazem reps 0 e peso 0, e adivinhar pelos
+  // valores fazia uma ida de bicicleta aparecer como "corpo x 0".
+  var texto = descreverSerie(s, tipoDoExercicio(exercicioPorId(s.exercicioId)));
   return '<div class="serie' + (pr ? ' recorde' : '') + '" data-serie="' + s.id + '">' +
     '<span class="n">' + n + '</span>' +
     '<span class="v crescer">' + esc(texto) + '</span>' +
@@ -1768,71 +1807,137 @@ function resumoDoDia(data) {
   return { series: series.length, grupos: grupos };
 }
 
-/* Escolher de que dia copiar. O dia e sempre escolhido a mao: repetir o treino
-   de ha duas semanas e tao normal como repetir o de ontem. */
+/* Escolher de que dia copiar, num calendario.
+
+   O dia e sempre escolhido a mao: repetir o treino de ha duas semanas e tao
+   normal como repetir o de ontem. As setas do mes saltam directamente para o
+   mes seguinte ou anterior QUE TENHA TREINO — com seis anos de historico,
+   andar mes a mes por meses vazios seria um castigo. */
 function escolherTreinoParaCopiar() {
   var dias = diasComTreino().filter(function (d) { return d !== Estado.dataAtual; });
   if (!dias.length) { avisar('Ainda não há nenhum treino para copiar'); return; }
 
+  var comTreino = {};
+  dias.forEach(function (d) { comTreino[d] = true; });
+
+  var mes = dias[0].slice(0, 7);      // comeca no mes do treino mais recente
+  var escolhido = null;
+
   abrirFolha('Copiar treino de',
-    '<label class="campo"><span>Procurar por exercício ou grupo</span>' +
-      '<input id="cProc" type="search" placeholder="peito, agachamento…" autocomplete="off"></label>' +
-    '<label class="campo"><span>Ou ir direito a um dia</span>' +
-      '<input id="cData" type="date" max="' + dias[0] + '"></label>' +
-    '<div id="cLista"></div>',
+    '<div id="copCal"></div><div id="copInfo"></div>',
     function (corpo) {
-      var proc = corpo.querySelector('#cProc');
-      var lista = corpo.querySelector('#cLista');
+      var cal = corpo.querySelector('#copCal');
+      var info = corpo.querySelector('#copInfo');
 
-      function desenhar() {
-        var termo = normalizarCabecalho(proc.value);
-        var visiveis = dias.filter(function (d) {
-          if (!termo) return true;
-          return seriesDoDia(d).some(function (s) {
-            var e = exercicioPorId(s.exercicioId);
-            if (!e) return false;
-            return normalizarCabecalho(e.nome).indexOf(termo) !== -1 ||
-                   normalizarCabecalho(e.grupo).indexOf(termo) !== -1;
-          });
+      function mesComTreino(paraTras) {
+        // dias vem do mais recente para tras
+        var candidatos = dias.filter(function (d) {
+          return paraTras ? d.slice(0, 7) < mes : d.slice(0, 7) > mes;
         });
+        if (!candidatos.length) return null;
+        return (paraTras ? candidatos[0] : candidatos[candidatos.length - 1]).slice(0, 7);
+      }
 
-        if (!visiveis.length) {
-          lista.innerHTML = '<p class="vazio pequeno">Nenhum treino com isso.</p>';
-          return;
+      function desenharCalendario() {
+        var ano = +mes.slice(0, 4), m = +mes.slice(5, 7);
+        var recuo = (new Date(Date.UTC(ano, m - 1, 1)).getUTCDay() + 6) % 7;
+        var diasNoMes = new Date(Date.UTC(ano, m, 0)).getUTCDate();
+        var atras = mesComTreino(true), frente = mesComTreino(false);
+
+        var html = '<div class="cartao" style="margin-top:0">' +
+          '<div class="linha entre" style="margin-bottom:12px">' +
+            '<button class="btn fina" id="copAtras"' + (atras ? '' : ' disabled') + '>&#8249;</button>' +
+            '<h3 style="margin:0;text-transform:none;font-size:17px;color:var(--texto)">' +
+              esc(MESES[m - 1] + ' ' + ano) + '</h3>' +
+            '<button class="btn fina" id="copFrente"' + (frente ? '' : ' disabled') + '>&#8250;</button>' +
+          '</div><div class="calendario">' +
+          ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'].map(function (d) {
+            return '<div class="dn">' + d + '</div>';
+          }).join('');
+
+        for (var i = 0; i < recuo; i++) html += '<button class="fora"></button>';
+        for (var dia = 1; dia <= diasNoMes; dia++) {
+          var iso = ano + '-' + String(m).padStart(2, '0') + '-' + String(dia).padStart(2, '0');
+          var classes = [];
+          if (comTreino[iso]) classes.push('treino');
+          if (iso === hojeIso()) classes.push('hoje');
+          if (iso === escolhido) classes.push('sel');
+          html += '<button class="' + classes.join(' ') + '"' +
+            (comTreino[iso] ? ' data-dia="' + iso + '"' : ' disabled') + '>' + dia + '</button>';
         }
+        html += '</div><p class="mini fraco centro" style="margin:12px 0 0">' +
+          'Os dias a azul têm treino. As setas saltam para o mês com treino mais próximo.' +
+          '</p></div>';
 
-        // Mostram-se 40 de cada vez: com 1130 treinos a lista ficaria pesada,
-        // e quem procura um dia antigo tem a caixa da data.
-        var mostrar = visiveis.slice(0, 40);
-        lista.innerHTML = '<div class="lista"><div class="cab">' +
-          (termo ? plural(visiveis.length, 'treino encontrado', 'treinos encontrados')
-                 : 'Últimos treinos') + '</div>' +
-          mostrar.map(function (d) {
-            var r = resumoDoDia(d);
-            return '<button class="item" data-copiar="' + d + '">' +
-              '<div class="crescer"><div style="font-weight:600">' + esc(dataLonga(d)) + '</div>' +
-              '<div class="mini fraco">' + plural(r.series, 'série', 'séries') + ' · ' +
-              esc(r.grupos.join(', ')) + '</div></div>' +
-              '<span class="seta">&#8250;</span></button>';
-          }).join('') + '</div>' +
-          (visiveis.length > mostrar.length
-            ? '<p class="mini fraco centro">e mais ' + num(visiveis.length - mostrar.length, 0) +
-              ' — usa a procura ou a caixa da data</p>' : '');
+        cal.innerHTML = html;
 
-        Array.prototype.forEach.call(lista.querySelectorAll('[data-copiar]'), function (b) {
-          b.onclick = function () { fecharFolha(); copiarTreino(b.dataset.copiar); };
+        var btAtras = cal.querySelector('#copAtras');
+        var btFrente = cal.querySelector('#copFrente');
+        if (atras) btAtras.onclick = function () { mes = atras; desenharCalendario(); };
+        if (frente) btFrente.onclick = function () { mes = frente; desenharCalendario(); };
+
+        Array.prototype.forEach.call(cal.querySelectorAll('[data-dia]'), function (b) {
+          b.onclick = function () {
+            escolhido = b.dataset.dia;
+            desenharCalendario();
+            desenharInfo();
+            info.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          };
         });
       }
 
-      proc.oninput = desenhar;
-      corpo.querySelector('#cData').onchange = function () {
-        var d = this.value;
-        if (!d) return;
-        if (dias.indexOf(d) === -1) { avisar('Não houve treino nesse dia'); return; }
-        fecharFolha();
-        copiarTreino(d);
-      };
-      desenhar();
+      /* A mesma informacao que a lista dava, mas so do dia escolhido — e com
+         os exercicios todos, que na lista nao cabiam. */
+      function desenharInfo() {
+        if (!escolhido) {
+          info.innerHTML = '<p class="vazio pequeno">Escolhe um dia a azul.</p>';
+          return;
+        }
+        var series = seriesDoDia(escolhido);
+        var volume = series.reduce(function (t, s) {
+          return t + (Number.isFinite(s.peso) ? s.peso : 0) * (Number.isFinite(s.reps) ? s.reps : 0);
+        }, 0);
+
+        var porEx = [];
+        series.forEach(function (s) {
+          var b = porEx.find(function (x) { return x.id === s.exercicioId; });
+          if (!b) { b = { id: s.exercicioId, series: [] }; porEx.push(b); }
+          b.series.push(s);
+        });
+
+        info.innerHTML =
+          '<div class="cartao"><h3>' + esc(dataLonga(escolhido)) + '</h3>' +
+            '<div class="linha entre">' +
+            '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
+              series.length + '</div><div class="mini fraco">séries</div></div>' +
+            '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
+              porEx.length + '</div><div class="mini fraco">exercícios</div></div>' +
+            '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
+              volumeCurto(volume) + '</div><div class="mini fraco">volume</div></div>' +
+            '</div></div>' +
+          '<div class="lista">' + porEx.map(function (bloco) {
+            var e = exercicioPorId(bloco.id);
+            var pesos = bloco.series.map(function (s) {
+              if (Number.isFinite(s.reps) && Number.isFinite(s.peso)) {
+                return (s.peso > 0 ? num(s.peso) : 'corpo') + '×' + s.reps;
+              }
+              if (Number.isFinite(s.tempoSeg)) return duracaoCurta(s.tempoSeg);
+              return '—';
+            }).join('  ');
+            return '<div class="item" style="display:block">' +
+              '<div style="font-weight:600">' + esc(e ? e.nome : 'Exercício apagado') + '</div>' +
+              '<div class="mini fraco nums">' + esc(pesos) + '</div></div>';
+          }).join('') + '</div>' +
+          '<button class="btn primaria larga" id="copConfirmar">Copiar este treino</button>';
+
+        info.querySelector('#copConfirmar').onclick = function () {
+          fecharFolha();
+          copiarTreino(escolhido);
+        };
+      }
+
+      desenharCalendario();
+      desenharInfo();
     });
 }
 
@@ -1877,11 +1982,74 @@ function copiarTreino(deData) {
     });
 }
 
-/* --- Registo de series de um exercicio --- */
+/* --------------------------------------------------------------------------
+   Registo de series
+
+   Nem todos os exercicios se medem da mesma maneira. O ecra muda conforme o
+   tipo, senao a bicicleta pedia peso e repeticoes, que ela nao tem:
+
+     peso_reps        kg + repeticoes      (o normal)
+     peso_tempo       kg + duracao         (prancha, isometricos)
+     distancia_tempo  duracao + distancia  (bicicleta, passadeira, elitica)
+
+   O tempo e guardado sempre em segundos. No ecra aparece em minutos para o
+   cardio e em segundos para os isometricos, que e como se pensa em cada um.
+   ----------------------------------------------------------------------- */
+
+var CAMPOS_POR_TIPO = {
+  peso_reps: ['peso', 'reps'],
+  peso_tempo: ['peso', 'tempoSeg'],
+  distancia_tempo: ['tempoMin', 'distancia']
+};
+
+var CAMPOS = {
+  peso:      { rotulo: 'Peso (kg)', passo: 2.5, modo: 'decimal' },
+  reps:      { rotulo: 'Reps', passo: 1, modo: 'numeric' },
+  tempoSeg:  { rotulo: 'Tempo (s)', passo: 15, modo: 'numeric' },
+  tempoMin:  { rotulo: 'Tempo (min)', passo: 1, modo: 'decimal' },
+  distancia: { rotulo: 'Distância (m)', passo: 100, modo: 'decimal' },
+  descanso:  { rotulo: 'Descanso', passo: 30, modo: 'numeric' }
+};
+
+function tipoDoExercicio(e) {
+  return CAMPOS_POR_TIPO[e && e.tipo] ? e.tipo : 'peso_reps';
+}
+
+/* O valor que cada campo mostra, tirado de uma serie ja feita. */
+function valorDoCampo(campo, serie) {
+  if (!serie) return null;
+  if (campo === 'tempoMin') {
+    return Number.isFinite(serie.tempoSeg) ? Math.round(serie.tempoSeg / 60 * 10) / 10 : null;
+  }
+  var v = serie[campo];
+  return Number.isFinite(v) ? v : null;
+}
+
+/* Descreve uma serie em texto curto, conforme o tipo. Serve para o botao de
+   repetir e para as listas. */
+function descreverSerie(s, tipo) {
+  if (tipo === 'distancia_tempo') {
+    var partes = [];
+    if (Number.isFinite(s.tempoSeg)) partes.push(duracaoCurta(s.tempoSeg));
+    if (Number.isFinite(s.distancia) && s.distancia > 0) partes.push(num(s.distancia, 0) + ' m');
+    return partes.join(' · ') || '—';
+  }
+  if (tipo === 'peso_tempo') {
+    return (Number.isFinite(s.tempoSeg) ? duracaoCurta(s.tempoSeg) : '—') +
+           (s.peso > 0 ? ' com ' + num(s.peso) + ' kg' : '');
+  }
+  if (Number.isFinite(s.reps) && Number.isFinite(s.peso)) {
+    return (s.peso > 0 ? num(s.peso) + ' kg' : 'corpo') + ' × ' + s.reps;
+  }
+  return '—';
+}
+
 function renderRegisto() {
   var e = exercicioPorId(Estado.exercicioAtivo);
   if (!e) { Estado.exercicioAtivo = null; return render(); }
 
+  var tipo = tipoDoExercicio(e);
+  var campos = CAMPOS_POR_TIPO[tipo];
   var data = Estado.dataAtual;
   var hoje = seriesDoDia(data).filter(function (s) { return s.exercicioId === e.id; });
   var todas = seriesDoExercicio(e.id);
@@ -1897,38 +2065,40 @@ function renderRegisto() {
   // Os campos comecam preenchidos com a ultima serie deste exercicio: a de
   // hoje se ja houver, senao a do ultimo dia em que foi feito.
   var ultima = hoje[hoje.length - 1] || sugestaoAnterior(e.id);
-  var pesoInicial = ultima ? ultima.peso : null;
-  var repsIniciais = ultima ? ultima.reps : null;
   var rirInicial = ultima && Number.isFinite(ultima.rir) ? ultima.rir : null;
   var repetivel = hoje[hoje.length - 1];
 
-  var html = '<div id="registo">' +
-    '<div class="tres">' +
-      passoNumerico('peso', 'Peso (kg)', pesoInicial, 'decimal') +
-      passoNumerico('reps', 'Reps', repsIniciais, 'numeric') +
-      '<div class="passo"><span>Descanso</span>' +
-        '<input id="cDescanso" type="number" inputmode="numeric" value="' +
-        descansoDoExercicio(e) + '">' +
-        '<div class="mm"><button data-passo="cDescanso:-30">&minus;</button>' +
-        '<button data-passo="cDescanso:30">+</button></div></div>' +
+  // O cardio nao leva RIR: nao ha repeticoes de reserva numa bicicleta.
+  var temRir = tipo !== 'distancia_tempo';
+
+  var html = '<div id="registo"><div class="tres">' +
+    campos.concat(['descanso']).map(function (c) {
+      var spec = CAMPOS[c];
+      var valor = c === 'descanso' ? descansoDoExercicio(e) : valorDoCampo(c, ultima);
+      return passoNumerico(c, spec.rotulo, valor, spec.modo, spec.passo);
+    }).join('') +
     '</div>' +
-    // O RIR vem preenchido com o da serie anterior, como o peso e as reps:
-    // e quase sempre o mesmo dentro do mesmo exercicio, e poupa um toque.
-    '<div class="rir-escolha" id="rirEscolha">' +
-      [0, 1, 2, 3, 4, 5].map(function (v) {
-        return '<button data-rir="' + v + '"' + (rirInicial === v ? ' class="on"' : '') +
-               '>' + v + '</button>';
-      }).join('') +
-      '<button data-rir=""' + (rirInicial === null ? ' class="on"' : '') + '>—</button>' +
-    '</div>' +
+    (temRir
+      ? '<div class="rir-escolha" id="rirEscolha">' +
+          [0, 1, 2, 3, 4, 5].map(function (v) {
+            return '<button data-rir="' + v + '"' + (rirInicial === v ? ' class="on"' : '') +
+                   '>' + v + '</button>';
+          }).join('') +
+          '<button data-rir=""' + (rirInicial === null ? ' class="on"' : '') + '>—</button>' +
+        '</div>'
+      : '') +
+    // A marca daquele numero de repeticoes, mesmo por cima do botao de gravar:
+    // e ali que faz falta saber se o peso que se vai meter bate alguma coisa.
+    (tipo === 'peso_reps' ? '<div id="prReps" class="linha entre pequeno" ' +
+      'style="padding:8px 2px 10px"></div>' : '') +
     '<button class="btn verde larga" id="btGravar">Gravar série</button>' +
     (repetivel ? '<button class="btn larga fina" id="btRepetir" style="margin-top:8px">' +
-      'Repetir a anterior (' + (repetivel.peso > 0 ? num(repetivel.peso) + ' kg' : 'corpo') +
-      ' × ' + repetivel.reps + ')</button>' : '') +
+      'Repetir a anterior (' + esc(descreverSerie(repetivel, tipo)) + ')</button>' : '') +
     '</div>';
 
   if (hoje.length) {
-    html += '<div class="lista"><div class="cab">Hoje · ' + plural(hoje.length, 'série', 'séries') + '</div>';
+    html += '<div class="lista"><div class="cab">Hoje · ' +
+      plural(hoje.length, 'série', 'séries') + '</div>';
     hoje.forEach(function (s, i) { html += linhaDeSerie(s, i + 1, prs[s.id]); });
     html += '</div>';
   }
@@ -1946,7 +2116,7 @@ function renderRegisto() {
   }
 
   var m = melhores()[e.id];
-  if (m) {
+  if (m && tipo === 'peso_reps') {
     html += '<div class="cartao"><h3>Melhor de sempre</h3><div class="linha entre">' +
       '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
         kg(m.pesoMax) + '</div><div class="mini fraco">peso</div></div>' +
@@ -1955,6 +2125,18 @@ function renderRegisto() {
       '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
         m.totalSeries + '</div><div class="mini fraco">séries feitas</div></div>' +
       '</div></div>';
+    html += htmlTabelaRepMax(e.id);
+  } else if (tipo !== 'peso_reps' && todas.length) {
+    var maisLongo = todas.reduce(function (a, s) {
+      return (Number.isFinite(s.tempoSeg) && (!a || s.tempoSeg > a.tempoSeg)) ? s : a;
+    }, null);
+    html += '<div class="cartao"><h3>Melhor de sempre</h3><div class="linha entre">' +
+      '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
+        (maisLongo ? duracaoCurta(maisLongo.tempoSeg) : '—') +
+        '</div><div class="mini fraco">mais tempo</div></div>' +
+      '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
+        todas.length + '</div><div class="mini fraco">séries feitas</div></div>' +
+      '</div></div>';
   }
 
   $('#v-treino').innerHTML = html;
@@ -1962,8 +2144,7 @@ function renderRegisto() {
   ligarLinhasDeSerie();
 }
 
-function passoNumerico(id, rotulo, valor, modo) {
-  var passo = id === 'peso' ? 2.5 : 1;
+function passoNumerico(id, rotulo, valor, modo, passo) {
   return '<div class="passo"><span>' + esc(rotulo) + '</span>' +
     '<input id="c' + id + '" type="number" inputmode="' + modo + '" step="any" value="' +
     (valor === null || valor === undefined ? '' : valor) + '">' +
@@ -1971,7 +2152,7 @@ function passoNumerico(id, rotulo, valor, modo) {
     '<button data-passo="c' + id + ':' + passo + '">+</button></div></div>';
 }
 
-/* Sugere o peso e as reps da ultima vez que se fez este exercicio. */
+/* Sugere os valores da ultima vez que se fez este exercicio. */
 function sugestaoAnterior(exercicioId) {
   var anteriores = seriesDoExercicio(exercicioId)
     .filter(function (s) { return s.data < Estado.dataAtual; })
@@ -1979,8 +2160,77 @@ function sugestaoAnterior(exercicioId) {
   return anteriores[anteriores.length - 1] || null;
 }
 
+/* A tabela das cargas maximas, uma linha por numero de repeticoes.
+   As linhas dominadas ficam esbatidas: sao numeros de repeticoes onde nunca
+   se foi a serio, e mostra-las a cheio dava a entender uma marca que nao e. */
+function htmlTabelaRepMax(exercicioId) {
+  var linhas = recordesPorReps(Estado.series, exercicioId);
+  if (!linhas.length) return '';
+
+  var maiorPeso = Math.max.apply(null, linhas.map(function (l) { return l.peso; }));
+  var temDominadas = linhas.some(function (l) { return l.dominada; });
+
+  return '<div class="cartao"><h3>Carga máxima por repetições</h3>' +
+    '<div class="lista" style="margin:0">' +
+    linhas.map(function (l) {
+      var largura = Math.max(4, l.peso / maiorPeso * 100);
+      return '<button class="item" data-serie="' + l.serieId + '"' +
+        (l.dominada ? ' style="opacity:.45"' : '') + '>' +
+        '<span class="nums suave" style="width:44px;flex:none;font-weight:600">' +
+          l.reps + '×</span>' +
+        '<div class="crescer">' +
+          '<div style="height:6px;background:var(--sup3);border-radius:99px;overflow:hidden">' +
+            '<div style="height:100%;width:' + largura.toFixed(1) + '%;background:var(--ambar);' +
+            'border-radius:99px"></div></div>' +
+          '<div class="mini fraco" style="margin-top:3px">' + esc(dataLonga(l.data)) +
+            (l.rm1 ? ' · 1RM ~' + kg(l.rm1) : '') + '</div>' +
+        '</div>' +
+        '<span class="nums" style="font-weight:700;flex:none">' + kg(l.peso) + '</span>' +
+        '</button>';
+    }).join('') + '</div>' +
+    (temDominadas
+      ? '<p class="mini fraco" style="margin:10px 0 0">As linhas esbatidas já foram ' +
+        'batidas por séries com mais repetições e pelo menos o mesmo peso.</p>'
+      : '') +
+    '</div>';
+}
+
+/* A linha que mostra a marca daquelas repeticoes enquanto se escreve.
+   Devolve o HTML, para o mesmo texto servir na primeira pintura e nas
+   actualizacoes. */
+function htmlPrParaReps(exercicioId, reps, pesoAtual) {
+  if (!Number.isFinite(reps) || reps < 1) {
+    return '<span class="fraco">Põe as repetições para veres a marca</span><span></span>';
+  }
+  var quantas = plural(reps, 'rep', 'reps');
+  var marca = recordesPorReps(Estado.series, exercicioId).find(function (l) {
+    return l.reps === reps;
+  });
+  if (!marca) {
+    return '<span class="suave">A ' + esc(quantas) + '</span>' +
+      '<span class="fraco">ainda nunca fizeste</span>';
+  }
+  // Aqui so interessa o numero a bater. O aviso de que a marca ja foi batida
+  // por uma serie mais longa fica para a tabela, que tem espaco para isso.
+  var bate = Number.isFinite(pesoAtual) && pesoAtual > marca.peso;
+  return '<span class="suave">PR a ' + esc(quantas) + '</span>' +
+    '<span class="nums" style="font-weight:700;color:' +
+      (bate ? 'var(--verde)' : 'var(--ambar)') + '">' +
+      (bate ? '↑ bate ' : '') + kg(marca.peso) + '</span>';
+}
+
 function ligarRegisto(e, rirInicial) {
+  var tipo = tipoDoExercicio(e);
+  var campos = CAMPOS_POR_TIPO[tipo];
   var rirEscolhido = rirInicial === undefined ? null : rirInicial;
+
+  function actualizarPr() {
+    var alvo = document.getElementById('prReps');
+    if (!alvo) return;
+    var reps = parseInt((document.getElementById('creps') || {}).value, 10);
+    var peso = parseFloat((document.getElementById('cpeso') || {}).value);
+    alvo.innerHTML = htmlPrParaReps(e.id, reps, peso);
+  }
 
   Array.prototype.forEach.call(document.querySelectorAll('[data-passo]'), function (b) {
     b.onclick = function () {
@@ -1990,9 +2240,16 @@ function ligarRegisto(e, rirInicial) {
       if (!Number.isFinite(atual)) atual = 0;
       var novo = atual + parseFloat(p[1]);
       campo.value = Math.max(0, Math.round(novo * 100) / 100);
+      actualizarPr();
       vibrar(8);
     };
   });
+
+  ['creps', 'cpeso'].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) el.oninput = actualizarPr;
+  });
+  actualizarPr();
 
   Array.prototype.forEach.call(document.querySelectorAll('#rirEscolha button'), function (b) {
     b.onclick = function () {
@@ -2004,9 +2261,36 @@ function ligarRegisto(e, rirInicial) {
     };
   });
 
-  function gravar(peso, reps, rir) {
-    if (!Number.isFinite(reps) || reps <= 0) { avisar('Faltam as repetições'); return; }
-    if (!Number.isFinite(peso)) peso = 0;
+  /* Le os campos do ecra e devolve a serie ja no formato guardado. */
+  function lerCampos() {
+    var s = { peso: null, reps: null, tempoSeg: null, distancia: null };
+    campos.forEach(function (c) {
+      var el = document.getElementById('c' + c);
+      var v = el ? parseFloat(el.value) : NaN;
+      if (!Number.isFinite(v)) return;
+      if (c === 'tempoMin') s.tempoSeg = Math.round(v * 60);
+      else if (c === 'reps') s.reps = Math.round(v);
+      else s[c] = c === 'tempoSeg' ? Math.round(v) : v;
+    });
+    return s;
+  }
+
+  /* Diz o que falta, em vez de gravar uma serie vazia. */
+  function oQueFalta(s) {
+    if (tipo === 'peso_reps') {
+      return (Number.isFinite(s.reps) && s.reps > 0) ? null : 'Faltam as repetições';
+    }
+    if (tipo === 'peso_tempo') {
+      return (Number.isFinite(s.tempoSeg) && s.tempoSeg > 0) ? null : 'Falta o tempo';
+    }
+    var temTempo = Number.isFinite(s.tempoSeg) && s.tempoSeg > 0;
+    var temDistancia = Number.isFinite(s.distancia) && s.distancia > 0;
+    return (temTempo || temDistancia) ? null : 'Falta o tempo ou a distância';
+  }
+
+  function gravar(valores, rir) {
+    var falta = oQueFalta(valores);
+    if (falta) { avisar(falta); return; }
     if (rir === undefined) rir = rirEscolhido;
 
     var sessao = garantirSessao(Estado.dataAtual);
@@ -2022,11 +2306,11 @@ function ligarRegisto(e, rirInicial) {
       data: Estado.dataAtual,
       ordemExercicio: ordemEx,
       ordem: doDia.length,
-      peso: peso,
-      reps: reps,
+      peso: Number.isFinite(valores.peso) ? valores.peso : 0,
+      reps: Number.isFinite(valores.reps) ? valores.reps : null,
       rir: Number.isFinite(rir) ? rir : null,
-      tempoSeg: null,
-      distancia: null,
+      tempoSeg: Number.isFinite(valores.tempoSeg) ? valores.tempoSeg : null,
+      distancia: Number.isFinite(valores.distancia) ? valores.distancia : null,
       supersetId: null,
       nota: null
     };
@@ -2038,7 +2322,7 @@ function ligarRegisto(e, rirInicial) {
     var pr = recordes()[serie.id];
     BD.guardar('series', serie).then(function () {
       if (pr) { avisar('Recorde! ' + nomeDoRecorde(pr)); vibrar([60, 40, 60, 40, 120]); }
-      var descanso = parseInt(document.getElementById('cDescanso').value, 10);
+      var descanso = parseInt(document.getElementById('cdescanso').value, 10);
       if (Number.isFinite(descanso) && descanso > 0) {
         Crono.arrancar(descanso);
         guardarDescanso(e, descanso);
@@ -2048,17 +2332,14 @@ function ligarRegisto(e, rirInicial) {
     });
   }
 
-  $('#btGravar').onclick = function () {
-    gravar(parseFloat(document.getElementById('cpeso').value),
-           parseInt(document.getElementById('creps').value, 10));
-  };
+  $('#btGravar').onclick = function () { gravar(lerCampos()); };
 
   var repetir = $('#btRepetir');
   if (repetir) {
     repetir.onclick = function () {
       var hoje = seriesDoDia(Estado.dataAtual).filter(function (s) { return s.exercicioId === e.id; });
       var u = hoje[hoje.length - 1];
-      if (u) gravar(u.peso, u.reps, u.rir);
+      if (u) gravar({ peso: u.peso, reps: u.reps, tempoSeg: u.tempoSeg, distancia: u.distancia }, u.rir);
     };
   }
 }
@@ -2087,28 +2368,55 @@ function editarSerie(id) {
   if (!s) return;
   var e = exercicioPorId(s.exercicioId);
 
+  // Os campos sao os do tipo do exercicio: editar uma ida de bicicleta nao
+  // pode pedir repeticoes.
+  var tipoEd = tipoDoExercicio(e);
+  var campoNum = function (id, rotulo, valor, modo) {
+    return '<label class="campo"><span>' + esc(rotulo) + '</span>' +
+      '<input id="' + id + '" type="number" inputmode="' + modo + '" step="any" value="' +
+      (Number.isFinite(valor) ? valor : '') + '"></label>';
+  };
+
   abrirFolha(e ? e.nome : 'Série',
-    '<label class="campo"><span>Peso (kg)</span>' +
-      '<input id="ePeso" type="number" inputmode="decimal" step="any" value="' +
-      (s.peso === null ? '' : s.peso) + '"></label>' +
-    '<label class="campo"><span>Repetições</span>' +
-      '<input id="eReps" type="number" inputmode="numeric" value="' +
-      (s.reps === null ? '' : s.reps) + '"></label>' +
-    '<label class="campo"><span>RIR (repetições que ainda dava para fazer)</span>' +
-      '<input id="eRir" type="number" inputmode="numeric" min="0" max="10" value="' +
-      (Number.isFinite(s.rir) ? s.rir : '') + '" placeholder="deixa vazio se não registaste"></label>' +
+    (tipoEd === 'distancia_tempo'
+      ? campoNum('eTempo', 'Tempo (segundos)', s.tempoSeg, 'numeric') +
+        campoNum('eDist', 'Distância (m)', s.distancia, 'decimal')
+      : tipoEd === 'peso_tempo'
+        ? campoNum('ePeso', 'Peso (kg)', s.peso, 'decimal') +
+          campoNum('eTempo', 'Tempo (segundos)', s.tempoSeg, 'numeric')
+        : campoNum('ePeso', 'Peso (kg)', s.peso, 'decimal') +
+          campoNum('eReps', 'Repetições', s.reps, 'numeric')) +
+    (tipoEd !== 'distancia_tempo'
+      ? '<label class="campo"><span>RIR (repetições que ainda dava para fazer)</span>' +
+        '<input id="eRir" type="number" inputmode="numeric" min="0" max="10" value="' +
+        (Number.isFinite(s.rir) ? s.rir : '') +
+        '" placeholder="deixa vazio se não registaste"></label>'
+      : '') +
     '<label class="campo"><span>Nota</span>' +
       '<textarea id="eNota" rows="2">' + esc(s.nota || '') + '</textarea></label>' +
     '<button class="btn primaria larga" id="eGuardar">Guardar</button>' +
     '<button class="btn perigo larga" id="eApagar" style="margin-top:8px">Apagar série</button>',
     function (corpo) {
       corpo.querySelector('#eGuardar').onclick = function () {
-        var peso = parseFloat(corpo.querySelector('#ePeso').value);
-        var reps = parseInt(corpo.querySelector('#eReps').value, 10);
-        var rir = corpo.querySelector('#eRir').value.trim();
-        s.peso = Number.isFinite(peso) ? peso : 0;
-        s.reps = Number.isFinite(reps) ? reps : null;
-        s.rir = rir === '' ? null : parseFloat(rir);
+        // Cada campo so e lido se existir: os campos mudam com o tipo.
+        var ler = function (id, inteiro) {
+          var el = corpo.querySelector('#' + id);
+          if (!el) return undefined;
+          var v = inteiro ? parseInt(el.value, 10) : parseFloat(el.value);
+          return Number.isFinite(v) ? v : null;
+        };
+        var peso = ler('ePeso'), reps = ler('eReps', true);
+        var tempo = ler('eTempo', true), dist = ler('eDist');
+        var elRir = corpo.querySelector('#eRir');
+
+        if (peso !== undefined) s.peso = peso === null ? 0 : peso;
+        if (reps !== undefined) s.reps = reps;
+        if (tempo !== undefined) s.tempoSeg = tempo;
+        if (dist !== undefined) s.distancia = dist;
+        if (elRir) {
+          var rir = elRir.value.trim();
+          s.rir = rir === '' ? null : parseFloat(rir);
+        }
         s.nota = corpo.querySelector('#eNota').value.trim() || null;
         reindexar();
         BD.guardar('series', s).then(function () { fecharFolha(); avisar('Série guardada'); render(); });
@@ -2722,6 +3030,14 @@ function editarExercicio(id) {
         return '<option value="' + esc(g) + '"' +
           (e && e.grupo === g ? ' selected' : '') + '>' + esc(g) + '</option>';
       }).join('') + '</select></label>' +
+    '<label class="campo"><span>Como se mede</span><select id="xTipo">' +
+      [['peso_reps', 'Peso e repetições'],
+       ['peso_tempo', 'Peso e tempo (prancha, isométricos)'],
+       ['distancia_tempo', 'Tempo e distância (cardio)']].map(function (t) {
+        return '<option value="' + t[0] + '"' +
+          ((e ? tipoDoExercicio(e) : 'peso_reps') === t[0] ? ' selected' : '') +
+          '>' + esc(t[1]) + '</option>';
+      }).join('') + '</select></label>' +
     '<label class="campo"><span>Descanso entre séries (segundos)</span>' +
       '<input id="xDescanso" type="number" inputmode="numeric" value="' +
       (e && e.descansoSeg ? e.descansoSeg : Estado.definicoes.descansoPadraoSeg) + '"></label>' +
@@ -2733,10 +3049,11 @@ function editarExercicio(id) {
         if (!nome) { avisar('Falta o nome'); return; }
         var descanso = parseInt(corpo.querySelector('#xDescanso').value, 10);
         var alvo = e || {
-          id: proximoId(Estado.exercicios), tipo: 'peso_reps', notas: null, arquivado: false
+          id: proximoId(Estado.exercicios), notas: null, arquivado: false
         };
         alvo.nome = nome;
         alvo.grupo = corpo.querySelector('#xGrupo').value;
+        alvo.tipo = corpo.querySelector('#xTipo').value;
         alvo.descansoSeg = Number.isFinite(descanso) && descanso > 0 ? descanso : null;
         if (!e) Estado.exercicios.push(alvo);
         reindexar();

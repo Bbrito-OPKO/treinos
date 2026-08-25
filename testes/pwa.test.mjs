@@ -52,9 +52,34 @@ test('os campos de numero nao fazem o Safari dar zoom', () => {
   assert.ok(+m[1] >= 16, 'os campos tem ' + m[1] + 'px; abaixo de 16 o Safari da zoom');
 });
 
-test('os campos de peso e reps abrem o teclado numerico', () => {
-  assert.match(html, /inputmode="decimal"/, 'o peso precisa de virgula');
-  assert.match(html, /inputmode="numeric"/, 'as reps sao inteiras');
+test('os campos abrem o teclado numerico certo', () => {
+  // O inputmode e montado a partir da tabela CAMPOS, por isso e a tabela que
+  // se verifica — e nao um inputmode="decimal" escrito a mao no HTML.
+  assert.match(html, /inputmode="'\s*\+\s*modo\s*\+\s*'"/,
+    'os campos tem de emitir um inputmode');
+
+  const tabela = html.match(/var CAMPOS = \{([\s\S]*?)\n\};/);
+  assert.ok(tabela, 'nao encontrei a tabela CAMPOS');
+  const spec = (nome) => {
+    const m = tabela[1].match(new RegExp(nome + ":\\s*\\{[^}]*modo:\\s*'(\\w+)'"));
+    return m && m[1];
+  };
+  assert.equal(spec('peso'), 'decimal', 'o peso precisa de vírgula');
+  assert.equal(spec('reps'), 'numeric', 'as reps são inteiras');
+  assert.equal(spec('tempoSeg'), 'numeric');
+  assert.equal(spec('tempoMin'), 'decimal');
+  assert.equal(spec('distancia'), 'decimal');
+});
+
+test('os tres tipos de exercicio tem campos proprios', () => {
+  // Sem isto, registar uma ida de bicicleta pedia peso e repeticoes.
+  const m = html.match(/var CAMPOS_POR_TIPO = \{([\s\S]*?)\n\};/);
+  assert.ok(m, 'nao encontrei CAMPOS_POR_TIPO');
+  for (const tipo of ['peso_reps', 'peso_tempo', 'distancia_tempo']) {
+    assert.ok(m[1].includes(tipo + ':'), 'falta o tipo ' + tipo);
+  }
+  assert.match(m[1], /distancia_tempo:\s*\['tempoMin',\s*'distancia'\]/,
+    'o cardio nao pode pedir peso nem repeticoes');
 });
 
 test('nao ha nada vindo da rede', () => {

@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { nucleo } from './nucleo.mjs';
 import { backup, ESPERADO, SEM_DADOS } from './dados.mjs';
 
-const { detetarRecordes, melhoresPorExercicio } = nucleo;
+const { detetarRecordes, melhoresPorExercicio, recordesPorReps } = nucleo;
 
 // Ajuda a escrever series de teste sem ruido.
 let n = 0;
@@ -115,6 +115,70 @@ test('melhoresPorExercicio devolve a melhor marca de sempre', () => {
   assert.equal(m[1].totalSeries, 3);
   assert.equal(m[1].ultima, '2026-01-15');
   assert.equal(m[1].melhorVolumeSerie, 90 * 12);
+});
+
+/* ------------------------------------ cargas maximas por repeticoes */
+
+test('carga maxima por reps: uma linha por numero de repeticoes feito', () => {
+  const t = recordesPorReps([
+    serie('2026-01-01', 100, 5),
+    serie('2026-01-08', 105, 5),    // bate as 5
+    serie('2026-01-15', 90, 10),
+    serie('2026-01-22', 120, 3)
+  ], 1);
+  assert.deepEqual(t.map(l => [l.reps, l.peso]), [[3, 120], [5, 105], [10, 90]]);
+  assert.equal(t.length, 3, 'nao inventa linhas para reps que nunca se fizeram');
+});
+
+test('carga maxima por reps: nao inventa as repeticoes que faltam', () => {
+  // Fez 5 e 10. Nao pode aparecer nada nas 4, 6, 7, 8 nem 9.
+  const t = recordesPorReps([serie('2026-01-01', 100, 5), serie('2026-01-02', 80, 10)], 1);
+  assert.deepEqual(t.map(l => l.reps), [5, 10]);
+});
+
+test('carga maxima por reps: marca as linhas que ja foram batidas', () => {
+  // 100 kg x 8 torna sem valor a marca de 95 kg x 5: mais peso E mais reps.
+  const t = recordesPorReps([
+    serie('2026-01-01', 95, 5),
+    serie('2026-01-08', 100, 8)
+  ], 1);
+  assert.equal(t.find(l => l.reps === 5).dominada, true);
+  assert.equal(t.find(l => l.reps === 8).dominada, false);
+});
+
+test('carga maxima por reps: o mesmo peso com mais reps tambem domina', () => {
+  const t = recordesPorReps([
+    serie('2026-01-01', 100, 5),
+    serie('2026-01-08', 100, 9)
+  ], 1);
+  assert.equal(t.find(l => l.reps === 5).dominada, true, 'igual no peso e mais reps chega');
+});
+
+test('carga maxima por reps: em empate fica a primeira vez', () => {
+  const a = { id: 1, exercicioId: 1, data: '2026-01-01', peso: 100, reps: 5 };
+  const b = { id: 2, exercicioId: 1, data: '2026-06-01', peso: 100, reps: 5 };
+  assert.equal(recordesPorReps([b, a], 1)[0].serieId, 1);
+});
+
+test('carga maxima por reps: peso corporal e outros exercicios ficam de fora', () => {
+  const t = recordesPorReps([
+    serie('2026-01-01', 0, 20),        // peso corporal: nao ha carga
+    serie('2026-01-02', 50, 5, 2),     // outro exercicio
+    serie('2026-01-03', 100, 5)
+  ], 1);
+  assert.deepEqual(t.map(l => [l.reps, l.peso]), [[5, 100]]);
+});
+
+test('carga maxima por reps: traz o 1RM estimado de cada linha', () => {
+  const t = recordesPorReps([serie('2026-01-01', 100, 10)], 1);
+  assert.ok(Math.abs(t[0].rm1 - 133.3333333) < 0.001, '1RM das 10 reps');
+  const uma = recordesPorReps([serie('2026-02-01', 140, 1)], 1);
+  assert.equal(uma[0].rm1, 140, 'com 1 rep o 1RM e o proprio peso');
+});
+
+test('carga maxima por reps: sem series devolve lista vazia', () => {
+  assert.deepEqual(recordesPorReps([], 1), []);
+  assert.deepEqual(recordesPorReps([serie('2026-01-01', 100, 5, 2)], 1), []);
 });
 
 /* --------------------------------------------- contra o historico real */

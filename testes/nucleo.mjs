@@ -22,7 +22,7 @@ const NOMES = [
   'detetarColunas', 'pareceCabecalho', 'COLUNAS_POR_DEFEITO',
   'analisarData', 'detetarOrdemDatas', 'analisarTempo', 'analisarNumero',
   'LBS_PARA_KG', 'traduzirGrupo', 'GRUPOS_APP', 'GRUPOS_CONHECIDOS',
-  'importarFitNotes', 'detetarRecordes', 'melhoresPorExercicio',
+  'importarFitNotes', 'detetarRecordes', 'melhoresPorExercicio', 'recordesPorReps',
   'agregarPorPeriodo', 'mediaRir', 'progressaoExercicio'
 ];
 
