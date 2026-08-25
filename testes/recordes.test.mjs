@@ -135,6 +135,27 @@ test('historico real: bate exactamente os recordes marcados pelo FitNotes', SEM_
   assert.equal(meus.size, ESPERADO.recordesMarcadosPelaApp);
 });
 
+test('historico real: as posicoes sao ordinais pequenos, nao o ZINDEX cru', SEM_DADOS, () => {
+  // O ZINDEX da base do FitNotes e uma chave de ordenacao de 64 bits
+  // (-7378697629483820808 e afins). Ordena bem, mas somar-lhe seja o que for
+  // da lixo — e a app soma, quando copia um treino para um dia que ja tem
+  // series. O conversor renumera; este teste e a rede que garante que sim.
+  const b = backup();
+  const ordens = b.series.map(s => s.ordem);
+  const ordensEx = b.series.map(s => s.ordemExercicio);
+
+  assert.ok(ordens.every(Number.isInteger), 'ha ordens que nao sao inteiros');
+  assert.ok(Math.min(...ordens) >= 0, 'ordem negativa: sobrou o ZINDEX cru');
+  assert.ok(Math.max(...ordens) < 500, 'ordem de ' + Math.max(...ordens) + ': sobrou o ZINDEX cru');
+  assert.ok(Math.min(...ordensEx) >= 0 && Math.max(...ordensEx) < 100);
+
+  // Dentro de um dia, as posicoes tem de ser 0, 1, 2... sem buracos.
+  const doDia = b.series.filter(s => s.data === '2026-08-07')
+    .sort((a, c) => a.ordem - c.ordem);
+  assert.deepEqual(doDia.map(s => s.ordem), doDia.map((_, i) => i),
+    'as posicoes de um dia tem de ser seguidas');
+});
+
 test('historico real: 28.747 series passam pela deteccao sem rebentar', SEM_DADOS, () => {
   const b = backup();
   const r = detetarRecordes(b.series);

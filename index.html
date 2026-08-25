@@ -1039,8 +1039,28 @@ var BD = (function () {
           pe.createIndex('data', 'data', { unique: false });
         }
       };
-      pedido.onsuccess = function () { ligacao = pedido.result; resolve(ligacao); };
+      pedido.onsuccess = function () {
+        ligacao = pedido.result;
+        // Se outro separador pedir uma versao mais nova, esta ligacao tem de
+        // sair da frente, senao e ela que fica a bloquear a app do lado de la.
+        ligacao.onversionchange = function () { ligacao.close(); ligacao = null; };
+        resolve(ligacao);
+      };
       pedido.onerror = function () { reject(pedido.error); };
+
+      // A IndexedDB nao falha quando esta bloqueada: fica calada para sempre.
+      // Sem isto, uma app aberta noutro separador deixava este ecra em branco
+      // sem uma unica mensagem.
+      pedido.onblocked = function () {
+        reject(new Error('A base está a ser usada noutro separador. ' +
+          'Fecha os outros separadores da app e volta a abrir.'));
+      };
+      setTimeout(function () {
+        if (!ligacao) {
+          reject(new Error('A base de dados demorou de mais a abrir. ' +
+            'Fecha os outros separadores da app e tenta outra vez.'));
+        }
+      }, 10000);
     });
   }
 
@@ -1678,20 +1698,18 @@ function renderDia() {
   html += '<button class="btn primaria larga" id="btAddEx" style="margin-top:4px">' +
           '+ Adicionar exercício</button>';
 
-  // Atalho para repetir o treino anterior deste mesmo dia da semana
-  if (!series.length) {
-    var ultimo = ultimoTreinoAntesDe(data);
-    if (ultimo) {
-      html += '<button class="btn larga" id="btCopiar" style="margin-top:8px">' +
-        'Copiar treino de ' + esc(dataCurta(ultimo)) + '</button>';
-    }
+  // Copiar um treino que ja se fez. O dia e escolhido a mao: repetir o treino
+  // de ha duas semanas e tao normal como repetir o de ontem.
+  if (diasComTreino().some(function (d) { return d !== data; })) {
+    html += '<button class="btn larga" id="btCopiar" style="margin-top:8px">' +
+      'Copiar treino de outro dia</button>';
   }
 
   $('#v-treino').innerHTML = html;
 
   $('#btAddEx').onclick = function () { escolherExercicio(); };
   var copiar = $('#btCopiar');
-  if (copiar) copiar.onclick = function () { copiarTreino(ultimoTreinoAntesDe(data)); };
+  if (copiar) copiar.onclick = escolherTreinoParaCopiar;
   Array.prototype.forEach.call(document.querySelectorAll('[data-abrir-ex]'), function (b) {
     b.onclick = function () {
       Estado.exercicioAtivo = +b.dataset.abrirEx;
@@ -1732,24 +1750,120 @@ function ligarLinhasDeSerie() {
   });
 }
 
-function ultimoTreinoAntesDe(data) {
-  var datas = [...new Set(Estado.series.map(function (s) { return s.data; }))]
-    .filter(function (d) { return d < data; }).sort();
-  return datas[datas.length - 1] || null;
+/* Todos os dias em que houve treino, do mais recente para tras. */
+function diasComTreino() {
+  return [...new Set(Estado.series.map(function (s) { return s.data; }))]
+    .sort().reverse();
+}
+
+/* Resumo de um dia, para se reconhecer o treino sem ter de o abrir. */
+function resumoDoDia(data) {
+  var series = seriesDoDia(data);
+  var grupos = [];
+  series.forEach(function (s) {
+    var e = exercicioPorId(s.exercicioId);
+    var g = e ? e.grupo : 'Outros';
+    if (grupos.indexOf(g) === -1) grupos.push(g);
+  });
+  return { series: series.length, grupos: grupos };
+}
+
+/* Escolher de que dia copiar. O dia e sempre escolhido a mao: repetir o treino
+   de ha duas semanas e tao normal como repetir o de ontem. */
+function escolherTreinoParaCopiar() {
+  var dias = diasComTreino().filter(function (d) { return d !== Estado.dataAtual; });
+  if (!dias.length) { avisar('Ainda não há nenhum treino para copiar'); return; }
+
+  abrirFolha('Copiar treino de',
+    '<label class="campo"><span>Procurar por exercício ou grupo</span>' +
+      '<input id="cProc" type="search" placeholder="peito, agachamento…" autocomplete="off"></label>' +
+    '<label class="campo"><span>Ou ir direito a um dia</span>' +
+      '<input id="cData" type="date" max="' + dias[0] + '"></label>' +
+    '<div id="cLista"></div>',
+    function (corpo) {
+      var proc = corpo.querySelector('#cProc');
+      var lista = corpo.querySelector('#cLista');
+
+      function desenhar() {
+        var termo = normalizarCabecalho(proc.value);
+        var visiveis = dias.filter(function (d) {
+          if (!termo) return true;
+          return seriesDoDia(d).some(function (s) {
+            var e = exercicioPorId(s.exercicioId);
+            if (!e) return false;
+            return normalizarCabecalho(e.nome).indexOf(termo) !== -1 ||
+                   normalizarCabecalho(e.grupo).indexOf(termo) !== -1;
+          });
+        });
+
+        if (!visiveis.length) {
+          lista.innerHTML = '<p class="vazio pequeno">Nenhum treino com isso.</p>';
+          return;
+        }
+
+        // Mostram-se 40 de cada vez: com 1130 treinos a lista ficaria pesada,
+        // e quem procura um dia antigo tem a caixa da data.
+        var mostrar = visiveis.slice(0, 40);
+        lista.innerHTML = '<div class="lista"><div class="cab">' +
+          (termo ? plural(visiveis.length, 'treino encontrado', 'treinos encontrados')
+                 : 'Últimos treinos') + '</div>' +
+          mostrar.map(function (d) {
+            var r = resumoDoDia(d);
+            return '<button class="item" data-copiar="' + d + '">' +
+              '<div class="crescer"><div style="font-weight:600">' + esc(dataLonga(d)) + '</div>' +
+              '<div class="mini fraco">' + plural(r.series, 'série', 'séries') + ' · ' +
+              esc(r.grupos.join(', ')) + '</div></div>' +
+              '<span class="seta">&#8250;</span></button>';
+          }).join('') + '</div>' +
+          (visiveis.length > mostrar.length
+            ? '<p class="mini fraco centro">e mais ' + num(visiveis.length - mostrar.length, 0) +
+              ' — usa a procura ou a caixa da data</p>' : '');
+
+        Array.prototype.forEach.call(lista.querySelectorAll('[data-copiar]'), function (b) {
+          b.onclick = function () { fecharFolha(); copiarTreino(b.dataset.copiar); };
+        });
+      }
+
+      proc.oninput = desenhar;
+      corpo.querySelector('#cData').onchange = function () {
+        var d = this.value;
+        if (!d) return;
+        if (dias.indexOf(d) === -1) { avisar('Não houve treino nesse dia'); return; }
+        fecharFolha();
+        copiarTreino(d);
+      };
+      desenhar();
+    });
 }
 
 function copiarTreino(deData) {
   if (!deData) return;
   var origem = seriesDoDia(deData);
-  confirmar('Copiar treino', 'Vai copiar ' + origem.length + ' séries de ' + dataLonga(deData) +
-    ' para ' + dataLonga(Estado.dataAtual) + '. Os pesos e as reps vêm iguais; podes acertar depois.',
+  if (!origem.length) { avisar('Esse dia não tem séries'); return; }
+
+  var jaLa = seriesDoDia(Estado.dataAtual);
+  var aviso = jaLa.length
+    ? ' O dia de destino já tem ' + plural(jaLa.length, 'série', 'séries') + '; estas vão a seguir.'
+    : '';
+
+  confirmar('Copiar treino',
+    'Vai copiar ' + plural(origem.length, 'série', 'séries') + ' de ' + dataLonga(deData) +
+    ' para ' + dataLonga(Estado.dataAtual) + '. Os pesos e as reps vêm iguais; podes acertar ' +
+    'depois. O RIR não vem — esse é de cada dia.' + aviso,
     'Copiar', function () {
       var sessao = garantirSessao(Estado.dataAtual);
+      // As series copiadas entram DEPOIS das que ja la estao, senao os numeros
+      // de ordem chocavam e a lista do dia saia baralhada.
+      var desvioEx = new Set(jaLa.map(function (s) { return s.exercicioId; })).size;
+      var desvioOrdem = jaLa.length;
+      var proximo = proximoId(Estado.series);
+
       var novas = origem.map(function (s, i) {
         return {
-          id: proximoId(Estado.series) + i,
+          id: proximo + i,
           sessaoId: sessao.id, exercicioId: s.exercicioId, data: Estado.dataAtual,
-          ordemExercicio: s.ordemExercicio, ordem: s.ordem,
+          ordemExercicio: s.ordemExercicio + desvioEx,
+          ordem: s.ordem + desvioOrdem,
           peso: s.peso, reps: s.reps, rir: null,
           tempoSeg: s.tempoSeg, distancia: s.distancia, supersetId: null, nota: null
         };
@@ -1757,7 +1871,7 @@ function copiarTreino(deData) {
       Estado.series = Estado.series.concat(novas);
       reindexar();
       BD.guardarMuitos('series', novas).then(function () {
-        avisar(novas.length + ' séries copiadas');
+        avisar(plural(novas.length, 'série copiada', 'séries copiadas'));
         render();
       });
     });

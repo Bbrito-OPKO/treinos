@@ -168,6 +168,12 @@ def ler_series(bd, datas_das_sessoes):
     A ordem sai de duas colunas: ZWORKOUTEXERCISE.ZINDEX diz em que posicao do
     treino entrou o exercicio, e ZWORKOUTSET.ZINDEX diz a posicao da serie
     dentro desse exercicio.
+
+    ATENCAO: o ZINDEX nao e 0, 1, 2. E uma chave de ordenacao de 64 bits (so
+    tem 104 valores distintos em toda a base, do genero -7378697629483820808).
+    Ordena bem, mas nao se pode somar nem contar com ela. Por isso, depois de
+    ler tudo pela ordem certa, as posicoes sao renumeradas de 0 para cima, que
+    e o que a app usa quando grava uma serie nova.
     """
     series = []
     consulta = """
@@ -208,6 +214,19 @@ def ler_series(bd, datas_das_sessoes):
             "recordeOriginal": bool(linha["ZISALLTIMERECORD"]),
             "nota": (linha["ZNOTES"] or "").strip() or None,
         })
+
+    # Renumerar: 'ordem' e a posicao da serie no treino todo (0, 1, 2...) e
+    # 'ordemExercicio' e a posicao do exercicio nesse treino. A lista ja vem
+    # ordenada pela consulta, por isso basta contar.
+    posicao = {}
+    for s in series:
+        p = posicao.setdefault(s["sessaoId"], {"n": 0, "exercicios": {}})
+        if s["exercicioId"] not in p["exercicios"]:
+            p["exercicios"][s["exercicioId"]] = len(p["exercicios"])
+        s["ordemExercicio"] = p["exercicios"][s["exercicioId"]]
+        s["ordem"] = p["n"]
+        p["n"] += 1
+
     return series
 
 
@@ -278,6 +297,13 @@ def avisos_de_sanidade(backup):
     reps = [s["reps"] for s in backup["series"] if s["reps"]]
     if reps and max(reps) > 200:
         avisos.append("ATENCAO: %d repeticoes numa serie." % max(reps))
+    # As posicoes tem de ser ordinais pequenos: o ZINDEX cru da base sao
+    # numeros de 64 bits que estragam qualquer conta feita com eles.
+    ordens = [s["ordem"] for s in backup["series"]] + \
+             [s["ordemExercicio"] for s in backup["series"]]
+    if ordens and (min(ordens) < 0 or max(ordens) > 500):
+        avisos.append("ATENCAO: ordens entre %d e %d. Ficaram por renumerar?"
+                      % (min(ordens), max(ordens)))
     corporais = [p["kg"] for p in backup["pesagens"]]
     if corporais and (min(corporais) < 30 or max(corporais) > 250):
         avisos.append("ATENCAO: peso corporal entre %.1f e %.1f kg." % (min(corporais), max(corporais)))
