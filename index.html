@@ -3581,7 +3581,11 @@ function renderExercicios() {
     '<button class="btn larga fina" id="dImportarBackup" style="margin-top:8px">Importar backup (JSON)</button>' +
     '<button class="btn larga fina" id="dExportarJson" style="margin-top:8px">Guardar backup (JSON)</button>' +
     '<button class="btn larga fina" id="dExportarCsv" style="margin-top:8px">Guardar em CSV</button>' +
-    estadoDoBackup() + '</div>';
+    estadoDoBackup() + '</div>' +
+    '<div class="cartao"><h3>Versão</h3>' +
+    '<button class="btn larga fina" id="dProcurarVersao">Procurar atualização</button>' +
+    '<p class="mini fraco" style="margin:10px 0 0">A app procura sozinha de cada vez que ' +
+    'abre. Este botão serve para forçar, sem ter de fechar e abrir.</p></div>';
 
   $('#v-exercicios').innerHTML = html;
 
@@ -3592,6 +3596,7 @@ function renderExercicios() {
   $('#dImportarBackup').onclick = function () { pedirFicheiro('.json,application/json', importarBackupFicheiro); };
   $('#dExportarJson').onclick = exportarJson;
   $('#dExportarCsv').onclick = exportarCsv;
+  $('#dProcurarVersao').onclick = procurarAtualizacao;
 }
 
 /* Ha quanto tempo foi o ultimo backup, e em que estado esta o armazenamento.
@@ -3751,6 +3756,41 @@ function editarExercicio(id) {
 /* ===========================================================================
    Importar e exportar
    ======================================================================== */
+
+/* Pergunta ao service worker se ha versao nova, agora. Diz sempre alguma
+   coisa — um botao que fica calado nao serve para nada. */
+function procurarAtualizacao() {
+  var sw = navigator.serviceWorker && navigator.serviceWorker.controller;
+  if (!sw) {
+    avisar('Sem service worker: recarrega a página');
+    return;
+  }
+
+  avisar('A procurar…');
+  var canal = new MessageChannel();
+  var respondeu = false;
+
+  canal.port1.onmessage = function (e) {
+    respondeu = true;
+    var estado = e.data && e.data.estado;
+    if (estado === 'nova') {
+      $('#versaoNova').classList.add('on');
+      avisar('Há uma versão nova');
+    } else if (estado === 'ja-atualizada') {
+      avisar('Já estás na versão mais recente');
+    } else {
+      avisar('Sem ligação à internet');
+    }
+  };
+
+  sw.postMessage({ tipo: 'procurar-atualizacao', url: location.href }, [canal.port2]);
+
+  // Um service worker antigo nao sabe responder a esta mensagem; mais vale
+  // dizer o que fazer do que deixar o botao pendurado.
+  setTimeout(function () {
+    if (!respondeu) avisar('Não obtive resposta. Fecha e abre a app.');
+  }, 8000);
+}
 
 function pedirFicheiro(aceita, aoLer) {
   var input = document.createElement('input');
@@ -4076,7 +4116,11 @@ if ('serviceWorker' in navigator) {
   });
 
   window.addEventListener('load', function () {
-    navigator.serviceWorker.register('sw.js').catch(function (erro) {
+    // updateViaCache 'none': sem isto, o proprio sw.js era servido pela cache
+    // do browser (o GitHub Pages manda max-age=600) e uma versao nova podia
+    // demorar a ser vista. Assim o ficheiro do service worker vem sempre da
+    // rede quando o browser vai verificar se ha versao nova.
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function (erro) {
       // Falha o registo em file:// e em http sem ser localhost. A app continua
       // a funcionar, so nao fica disponivel offline.
       console.warn('Service worker não registado:', erro && erro.message);

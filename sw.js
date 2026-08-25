@@ -18,7 +18,24 @@
    Os dados do utilizador nao passam por aqui: vivem na IndexedDB do telemovel.
    ======================================================================== */
 
-const CACHE = 'treinos-v2';
+const CACHE = 'treinos-v3';
+
+/* Vai buscar a pagina IGNORANDO a cache do browser.
+
+   O GitHub Pages manda Cache-Control: max-age=600 em tudo. Sem isto, o pedido
+   que devia trazer a versao nova era servido pela cache do proprio browser
+   durante 10 minutos — e a comparacao dava sempre "igual", porque estava a
+   comparar a copia velha com ela propria. Num iPhone, com a app no ecra
+   principal, isso podia arrastar-se muito mais.
+
+   Usa-se um parametro na URL em vez de {cache:'reload'} porque o suporte
+   dessa opcao no WebKit nunca foi de confianca, e isto funciona em todo o
+   lado. A resposta e guardada na cache com a chave 'index.html', por isso o
+   parametro nao fica agarrado a nada. */
+function irBuscarPaginaFresca(url) {
+  const separador = url.indexOf('?') === -1 ? '?' : '&';
+  return fetch(url + separador + '_atualizacao=' + Date.now(), { cache: 'no-store' });
+}
 
 /* Diz as paginas abertas que ha uma versao nova guardada e pronta a entrar. */
 function avisarQueHaVersaoNova() {
@@ -58,6 +75,31 @@ self.addEventListener('activate', (evento) => {
   );
 });
 
+/* A pagina pode pedir uma verificacao a qualquer momento (botao "Procurar
+   atualização"). Responde sempre, mesmo quando nao ha nada de novo, para o
+   botao poder dizer o que encontrou em vez de ficar calado. */
+self.addEventListener('message', (evento) => {
+  if (!evento.data || evento.data.tipo !== 'procurar-atualizacao') return;
+  const responder = (r) => {
+    if (evento.ports && evento.ports[0]) evento.ports[0].postMessage(r);
+  };
+
+  evento.waitUntil(
+    caches.open(CACHE).then((cache) =>
+      irBuscarPaginaFresca(evento.data.url).then((resposta) => {
+        if (!resposta || !resposta.ok) return responder({ estado: 'sem-rede' });
+        return Promise.all([
+          cache.match('index.html').then((a) => (a ? a.text() : null)),
+          resposta.clone().text()
+        ]).then(([velha, nova]) => {
+          if (velha === nova) return responder({ estado: 'ja-atualizada' });
+          return cache.put('index.html', resposta).then(() => responder({ estado: 'nova' }));
+        });
+      })
+    ).catch(() => responder({ estado: 'sem-rede' }))
+  );
+});
+
 self.addEventListener('fetch', (evento) => {
   const pedido = evento.request;
 
@@ -78,7 +120,7 @@ self.addEventListener('fetch', (evento) => {
   if (pedido.mode === 'navigate' && caminho.endsWith('/index.html')) {
     evento.respondWith(
       caches.open(CACHE).then((cache) => {
-        const doServidor = fetch(pedido).then((resposta) => {
+        const doServidor = irBuscarPaginaFresca(pedido.url).then((resposta) => {
           if (!resposta || !resposta.ok) return resposta;
 
           // Comparar com o que estava guardado. Se mudou, avisa-se a pagina
