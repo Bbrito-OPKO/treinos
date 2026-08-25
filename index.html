@@ -318,6 +318,12 @@ a{color:var(--azul)}
 .selseg button{flex:1;min-height:36px;border-radius:8px;font-size:14px;font-weight:600;
   color:var(--suave)}
 .selseg button.on{background:var(--sup3);color:var(--texto)}
+.selseg button[disabled]{opacity:.5}
+/* Quando ha opcoes de mais para a largura do ecra, rola de lado em vez de as
+   espremer ate nao se lerem. */
+.selseg.rolavel{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.selseg.rolavel::-webkit-scrollbar{display:none}
+.selseg.rolavel button{flex:0 0 auto;padding:0 13px;white-space:nowrap}
 
 /* Barra de "ha versao nova". Fica por cima dos separadores, ao lado de onde
    o cronometro aparece, e nunca tapa o que se esta a fazer. */
@@ -1194,6 +1200,135 @@ function progressaoExercicio(series, exercicioId) {
   }).sort(function (a, b) { return a.data < b.data ? -1 : 1; });
 }
 
+/* --------------------------------------------------------------------------
+   Evolucao da carga maxima para um dado numero de repeticoes
+
+   Para cada dia de treino, o melhor peso levantado nesse dia com N repeticoes
+   ou mais. Responde a "como e que o meu maximo a 5 evoluiu", que e diferente
+   de "qual e o meu maximo a 5" — uma e a historia, a outra e o numero.
+
+   Dias em que o exercicio foi feito mas sempre com menos de N repeticoes nao
+   dao ponto nenhum: nao ha valor para mostrar, e inventar um a zero fazia o
+   grafico mergulhar sem razao.
+   ----------------------------------------------------------------------- */
+
+function pesoPorDiaParaReps(series, exercicioId, reps) {
+  if (!Number.isFinite(reps) || reps < 1) return [];
+  var porDia = {};
+  series.forEach(function (s) {
+    if (s.exercicioId !== exercicioId || !s.data || !serieFeita(s)) return;
+    if (!Number.isFinite(s.peso) || s.peso <= 0) return;
+    if (!Number.isFinite(s.reps) || s.reps < reps) return;
+    if (porDia[s.data] === undefined || s.peso > porDia[s.data]) porDia[s.data] = s.peso;
+  });
+  return Object.keys(porDia).sort().map(function (d) {
+    return { data: d, peso: porDia[d] };
+  });
+}
+
+/* --------------------------------------------------------------------------
+   Intervalos de datas
+   ----------------------------------------------------------------------- */
+
+/* Recua uma quantidade de dias a partir de uma data. */
+function recuarDias(dataIso, dias) {
+  var d = _dataUtc(dataIso);
+  d.setUTCDate(d.getUTCDate() - dias);
+  return d.toISOString().slice(0, 10);
+}
+
+/* Os periodos que a app oferece. 'tudo' nao tem inicio de proposito. */
+var PERIODOS = [
+  { chave: '4s', nome: '4 semanas', dias: 28 },
+  { chave: '3m', nome: '3 meses', dias: 91 },
+  { chave: '6m', nome: '6 meses', dias: 182 },
+  { chave: '1a', nome: '1 ano', dias: 365 },
+  { chave: 'tudo', nome: 'Tudo', dias: null }
+];
+
+/* Devolve {de, ate} a partir da escolha do utilizador. */
+function intervaloDoPeriodo(escolha, hoje) {
+  escolha = escolha || {};
+  if (escolha.tipo === 'datas') {
+    return { de: escolha.de || null, ate: escolha.ate || null };
+  }
+  var p = PERIODOS.filter(function (x) { return x.chave === escolha.tipo; })[0];
+  if (!p || p.dias === null) return { de: null, ate: null };
+  return { de: recuarDias(hoje, p.dias), ate: hoje };
+}
+
+/* Filtra series por intervalo. Um intervalo sem limites deixa passar tudo. */
+function filtrarPorIntervalo(series, intervalo) {
+  if (!intervalo || (!intervalo.de && !intervalo.ate)) return series;
+  return series.filter(function (s) {
+    if (!s.data) return false;
+    if (intervalo.de && s.data < intervalo.de) return false;
+    if (intervalo.ate && s.data > intervalo.ate) return false;
+    return true;
+  });
+}
+
+/* --------------------------------------------------------------------------
+   Objetivo de peso corporal
+
+   Um objetivo e tres coisas: onde se estava quando se decidiu (pesoInicial,
+   na data 'desde'), onde se quer chegar (kg) e ate quando (ate). A partir
+   disso da-se para desenhar a linha do que era preciso e comparar com o que
+   esta a acontecer.
+
+   Serve para emagrecer e para aumentar: as contas sao as mesmas, so muda o
+   sinal. Por isso nunca se compara "menor que" — compara-se o quanto do
+   caminho ja foi feito.
+   ----------------------------------------------------------------------- */
+
+function progressoObjetivoPeso(pesagens, objetivo, hoje) {
+  if (!objetivo || !Number.isFinite(objetivo.kg) || !objetivo.ate || !objetivo.desde) return null;
+  if (!Number.isFinite(objetivo.pesoInicial)) return null;
+
+  var ordenadas = (pesagens || []).slice().sort(function (a, b) { return a.data < b.data ? -1 : 1; });
+  var ultima = ordenadas[ordenadas.length - 1] || null;
+  var pesoAtual = ultima ? ultima.kg : objetivo.pesoInicial;
+
+  var caminhoTotal = objetivo.kg - objetivo.pesoInicial;   // negativo = emagrecer
+  var jaFeito = pesoAtual - objetivo.pesoInicial;
+
+  // Sem caminho nenhum (objetivo igual ao ponto de partida) ja se chegou.
+  var fracao = caminhoTotal === 0 ? 1 : jaFeito / caminhoTotal;
+
+  var diasTotais = diasEntre(objetivo.desde, objetivo.ate);
+  var diasPassados = diasEntre(objetivo.desde, hoje);
+  var diasRestantes = diasEntre(hoje, objetivo.ate);
+
+  // Onde se devia estar hoje, se o caminho fosse feito a ritmo constante.
+  var fracaoEsperada = diasTotais <= 0 ? 1
+    : Math.max(0, Math.min(1, diasPassados / diasTotais));
+  var pesoEsperado = objetivo.pesoInicial + caminhoTotal * fracaoEsperada;
+
+  return {
+    pesoAtual: pesoAtual,
+    dataDoPesoAtual: ultima ? ultima.data : objetivo.desde,
+    pesoInicial: objetivo.pesoInicial,
+    alvo: objetivo.kg,
+    falta: objetivo.kg - pesoAtual,
+    fracao: fracao,
+    percentagem: Math.max(0, Math.min(100, fracao * 100)),
+    atingido: caminhoTotal === 0 || fracao >= 1,
+    diasTotais: diasTotais,
+    diasRestantes: diasRestantes,
+    pesoEsperadoHoje: pesoEsperado,
+    // Adiantado quando ja se fez mais caminho do que o tempo pedia.
+    adiantado: fracao >= fracaoEsperada,
+    // Quanto e preciso mudar por semana daqui para a frente.
+    ritmoSemanalNecessario: diasRestantes > 0
+      ? (objetivo.kg - pesoAtual) / diasRestantes * 7 : null,
+    // Dois pontos, para desenhar a linha do objetivo por cima do peso real.
+    linha: [
+      { x: objetivo.desde, y: objetivo.pesoInicial },
+      { x: objetivo.ate, y: objetivo.kg }
+    ]
+  };
+}
+
 /* ===========================================================================
    NÚCLEO:FIM
    ======================================================================== */
@@ -1377,6 +1512,10 @@ var Estado = {
   abaAnalises: 'volume',
   exercicioAnalise: null,
   mesCalendario: null,
+  grupoAberto: null,          // nos Exercicios, o grupo em que se entrou
+  metricaAnalise: 'peso',     // que numero o grafico do exercicio mostra
+  repsDaMetrica: 5,           // para a metrica "maximo a N reps"
+  periodo: { tipo: '6m' },    // janela de tempo das Analises
 
   // Indices calculados, refeitos quando os dados mudam
   _porId: {},
@@ -3301,28 +3440,102 @@ var ABAS_ANALISE = [
   { chave: 'volume', nome: 'Volume' },
   { chave: 'exercicio', nome: 'Exercício' },
   { chave: 'esforco', nome: 'Esforço' },
+  { chave: 'peso', nome: 'Peso' },
   { chave: 'recordes', nome: 'Recordes' }
 ];
+
+/* As metricas que o grafico de um exercicio pode mostrar. */
+var METRICAS = [
+  { chave: 'peso', nome: 'Peso máx.', campo: 'pesoMax', cor: '#3b82f6', unidade: 'kg' },
+  { chave: '1rm', nome: '1RM', campo: 'melhor1RM', cor: '#22c55e', unidade: 'kg' },
+  { chave: 'volume', nome: 'Volume', campo: 'volume', cor: '#f59e0b', unidade: 'volume' },
+  { chave: 'series', nome: 'Séries', campo: 'series', cor: '#06b6d4', unidade: '' },
+  { chave: 'reps', nome: 'Reps', campo: 'reps', cor: '#84cc16', unidade: '' },
+  { chave: 'rir', nome: 'RIR', campo: 'rirMedio', cor: '#ec4899', unidade: '' },
+  { chave: 'porReps', nome: 'Máx. a N reps', campo: null, cor: '#ef4444', unidade: 'kg' }
+];
+
+function metricaAtual() {
+  return METRICAS.filter(function (m) { return m.chave === Estado.metricaAnalise; })[0] || METRICAS[0];
+}
+
+/* O intervalo escolhido, e as series que lhe pertencem. */
+function intervaloAtual() { return intervaloDoPeriodo(Estado.periodo, hojeIso()); }
+function seriesDoPeriodo() { return filtrarPorIntervalo(Estado.series, intervaloAtual()); }
+
+/* A barra de periodo, partilhada por todas as analises. */
+function seletorDePeriodo() {
+  var esc1 = Estado.periodo || {};
+  var botoes = PERIODOS.map(function (p) {
+    return '<button data-periodo="' + p.chave + '"' +
+      (esc1.tipo === p.chave ? ' class="on"' : '') + '>' + esc(p.nome) + '</button>';
+  }).join('') +
+    '<button data-periodo="datas"' + (esc1.tipo === 'datas' ? ' class="on"' : '') + '>Datas</button>';
+
+  var legenda = '';
+  if (esc1.tipo === 'datas' && esc1.de && esc1.ate) {
+    legenda = '<p class="mini fraco centro" style="margin:-6px 0 12px">' +
+      esc(dataLonga(esc1.de)) + ' a ' + esc(dataLonga(esc1.ate)) + '</p>';
+  }
+  return '<div class="selseg rolavel">' + botoes + '</div>' + legenda;
+}
+
+function ligarSeletorDePeriodo() {
+  Array.prototype.forEach.call(document.querySelectorAll('[data-periodo]'), function (b) {
+    b.onclick = function () {
+      if (b.dataset.periodo === 'datas') return escolherDatas();
+      Estado.periodo = { tipo: b.dataset.periodo };
+      render();
+    };
+  });
+}
+
+function escolherDatas() {
+  var p = Estado.periodo || {};
+  var datas = Estado.series.map(function (s) { return s.data; }).filter(Boolean).sort();
+  var primeira = datas[0] || hojeIso();
+
+  abrirFolha('Escolher datas',
+    '<label class="campo"><span>De</span><input id="pdDe" type="date" value="' +
+      (p.de || primeira) + '" min="' + primeira + '" max="' + hojeIso() + '"></label>' +
+    '<label class="campo"><span>Até</span><input id="pdAte" type="date" value="' +
+      (p.ate || hojeIso()) + '" min="' + primeira + '" max="' + hojeIso() + '"></label>' +
+    '<button class="btn primaria larga" id="pdOk">Ver este intervalo</button>',
+    function (corpo) {
+      corpo.querySelector('#pdOk').onclick = function () {
+        var de = corpo.querySelector('#pdDe').value;
+        var ate = corpo.querySelector('#pdAte').value;
+        if (!de || !ate) { avisar('Faltam as datas'); return; }
+        if (de > ate) { var t = de; de = ate; ate = t; }   // trocadas: endireita-se
+        Estado.periodo = { tipo: 'datas', de: de, ate: ate };
+        fecharFolha();
+        render();
+      };
+    });
+}
 
 function renderAnalises() {
   $('#titulo').textContent = 'Análises';
   $('#btVoltar').hidden = true;
   $('#btAcao').hidden = true;
 
-  var html = '<div class="selseg">' + ABAS_ANALISE.map(function (a) {
+  $('#v-analises').innerHTML = '<div class="selseg rolavel">' + ABAS_ANALISE.map(function (a) {
     return '<button data-aba="' + a.chave + '"' +
       (Estado.abaAnalises === a.chave ? ' class="on"' : '') + '>' + esc(a.nome) + '</button>';
   }).join('') + '</div><div id="corpoAnalise"></div>';
 
-  $('#v-analises').innerHTML = html;
   Array.prototype.forEach.call(document.querySelectorAll('[data-aba]'), function (b) {
     b.onclick = function () { Estado.abaAnalises = b.dataset.aba; render(); };
   });
 
   var corpo = $('#corpoAnalise');
+
+  // O peso corporal nao depende de haver treinos.
+  if (Estado.abaAnalises === 'peso') return analisePeso(corpo);
+
   if (!Estado.series.length) {
     corpo.innerHTML = '<p class="vazio">Ainda não há treinos.<br>' +
-      'Importa o histórico do FitNotes em Exercícios &rsaquo; Dados.</p>';
+      'Importa o histórico do FitNotes em Definições &rsaquo; Dados.</p>';
     return;
   }
 
@@ -3332,35 +3545,37 @@ function renderAnalises() {
   return analiseRecordes(corpo);
 }
 
-/* Ultimas N semanas, para os graficos nao ficarem ilegiveis com 6 anos. */
-function janela(semanas) {
-  var d = new Date(Date.now() - semanas * 7 * 86400000);
-  return d.toISOString().slice(0, 10);
+function nomeDoPeriodo() {
+  var p = Estado.periodo || {};
+  if (p.tipo === 'datas') return 'de ' + dataCurta(p.de) + ' a ' + dataCurta(p.ate);
+  var achado = PERIODOS.filter(function (x) { return x.chave === p.tipo; })[0];
+  return achado ? achado.nome.toLowerCase() : 'sempre';
 }
 
 function analiseVolume(corpo) {
-  var de = janela(26);
-  var semanas = agregarPorPeriodo(Estado.series, Estado.exercicios, { periodo: 'semana', de: de });
+  var intervalo = intervaloAtual();
+  var semanas = agregarPorPeriodo(Estado.series, Estado.exercicios,
+    { periodo: 'semana', de: intervalo.de, ate: intervalo.ate });
+
+  var html = seletorDePeriodo();
 
   if (!semanas.length) {
-    corpo.innerHTML = '<p class="vazio">Sem treinos nos últimos 6 meses.</p>' +
-      resumoDeSempre();
+    corpo.innerHTML = html + '<p class="vazio">Sem treinos neste período.</p>';
+    ligarSeletorDePeriodo();
     return;
   }
 
   var ultima = semanas[semanas.length - 1];
   var anterior = semanas[semanas.length - 2];
 
-  var html = '<div class="cartao"><h3>Volume por semana · 6 meses</h3>' +
+  html += '<div class="cartao"><h3>Volume por semana · ' + esc(nomeDoPeriodo()) + '</h3>' +
     grafBarras(semanas, { campo: 'volume', titulo: 'Volume semanal por grupo muscular' }) +
     '</div>';
 
-  html += '<div class="cartao"><h3>Séries por semana · 6 meses</h3>' +
-    grafBarras(semanas, { campo: 'series', altura: 220, titulo: 'Séries semanais por grupo' }) +
+  html += '<div class="cartao"><h3>Séries por semana · ' + esc(nomeDoPeriodo()) + '</h3>' +
+    grafBarras(semanas, { campo: 'series', altura: 170, titulo: 'Séries semanais por grupo' }) +
     '</div>';
 
-  // Series por grupo na semana em curso: e o indicador que interessa para
-  // saber se um grupo esta a levar treino a menos.
   var linhas = Object.keys(ultima.grupos).map(function (g) {
     var antes = anterior && anterior.grupos[g] ? anterior.grupos[g].series : null;
     var delta = antes === null ? '' : (ultima.grupos[g].series - antes >= 0 ? ' +' : ' ') +
@@ -3371,25 +3586,26 @@ function analiseVolume(corpo) {
     };
   }).sort(function (a, b) { return b.valor - a.valor; });
 
-  html += '<div class="cartao"><h3>Séries esta semana · desde ' +
+  html += '<div class="cartao"><h3>Séries na última semana · desde ' +
     esc(dataCurta(ultima.inicio)) + '</h3>' + grafBarrasH(linhas) +
     '<p class="mini fraco" style="margin:12px 0 0">Entre 10 e 20 séries por grupo por semana é a ' +
     'faixa que a maioria dos estudos usa para hipertrofia. Não é uma regra — é uma referência.</p>' +
     '</div>';
 
-  html += resumoDeSempre();
+  html += resumoDoPeriodo(intervalo);
   corpo.innerHTML = html;
+  ligarSeletorDePeriodo();
 }
 
-function resumoDeSempre() {
-  var series = Estado.series;
+function resumoDoPeriodo(intervalo) {
+  var series = filtrarPorIntervalo(Estado.series, intervalo).filter(serieFeita);
   var volume = series.reduce(function (t, s) {
     return t + (Number.isFinite(s.peso) ? s.peso : 0) * (Number.isFinite(s.reps) ? s.reps : 0);
   }, 0);
   var dias = new Set(series.map(function (s) { return s.data; })).size;
   var datas = series.map(function (s) { return s.data; }).sort();
 
-  return '<div class="cartao"><h3>Desde sempre</h3><div class="linha entre">' +
+  return '<div class="cartao"><h3>No período escolhido</h3><div class="linha entre">' +
     '<div class="centro crescer"><div style="font-size:20px;font-weight:700" class="nums">' +
       num(dias, 0) + '</div><div class="mini fraco">treinos</div></div>' +
     '<div class="centro crescer"><div style="font-size:20px;font-weight:700" class="nums">' +
@@ -3402,7 +3618,6 @@ function resumoDeSempre() {
 }
 
 function analiseExercicio(corpo) {
-  // Por defeito, o exercicio com mais series no historico.
   if (!Estado.exercicioAnalise) {
     var contas = {};
     Estado.series.forEach(function (s) { contas[s.exercicioId] = (contas[s.exercicioId] || 0) + 1; });
@@ -3412,65 +3627,76 @@ function analiseExercicio(corpo) {
   var e = exercicioPorId(Estado.exercicioAnalise);
   if (!e) { corpo.innerHTML = '<p class="vazio">Escolhe um exercício.</p>'; return; }
 
-  var pontos = progressaoExercicio(Estado.series, e.id);
-  var m = melhores()[e.id];
+  var m = metricaAtual();
+  var intervalo = intervaloAtual();
 
-  var html = '<button class="btn larga" id="trocarEx" style="margin-bottom:12px">' +
-    esc(e.nome) + ' &#9662;</button>';
+  var html = '<button class="btn larga" id="trocarEx" style="margin-bottom:10px">' +
+    esc(e.nome) + ' &#9662;</button>' +
+    seletorDePeriodo() +
+    '<div class="selseg rolavel" style="margin-top:-4px">' + METRICAS.map(function (x) {
+      return '<button data-metrica="' + x.chave + '"' +
+        (m.chave === x.chave ? ' class="on"' : '') + '>' + esc(x.nome) + '</button>';
+    }).join('') + '</div>';
+
+  // "Máx. a N reps" precisa de saber que N.
+  if (m.chave === 'porReps') {
+    var feitas = curvaDe(e.id).repsFeitas;
+    html += '<div class="selseg rolavel" style="margin-top:-4px">' +
+      (feitas.length
+        ? feitas.map(function (r) {
+            return '<button data-reps="' + r + '"' +
+              (Estado.repsDaMetrica === r ? ' class="on"' : '') + '>' + r + '×</button>';
+          }).join('')
+        : '<button disabled>sem repetições registadas</button>') +
+      '</div>';
+  }
+
+  var pontos = m.chave === 'porReps'
+    ? pesoPorDiaParaReps(seriesDoPeriodo(), e.id, Estado.repsDaMetrica)
+        .map(function (p) { return { x: p.data, y: p.peso }; })
+    : progressaoExercicio(seriesDoPeriodo(), e.id)
+        .filter(function (d) { return d[m.campo] !== null && d[m.campo] !== undefined; })
+        .map(function (d) { return { x: d.data, y: d[m.campo] }; });
 
   if (!pontos.length) {
-    corpo.innerHTML = html + '<p class="vazio">Ainda não há séries deste exercício.</p>';
-    $('#trocarEx').onclick = trocarExercicioAnalise;
-    return;
+    html += '<p class="vazio">Sem dados para ' + esc(m.nome.toLowerCase()) +
+      ' neste período.</p>';
+  } else {
+    var valores = pontos.map(function (p) { return p.y; });
+    var maximo = Math.max.apply(null, valores);
+    var ultimo = pontos[pontos.length - 1].y;
+    var formatar = function (v) {
+      return m.unidade === 'kg' ? kg(v) : m.unidade === 'volume' ? volumeCurto(v) : num(v, 1);
+    };
+
+    html += '<div class="cartao"><h3>' + esc(m.nome) +
+      (m.chave === 'porReps' ? ' · ' + Estado.repsDaMetrica + ' reps' : '') +
+      ' · ' + esc(nomeDoPeriodo()) + '</h3>' +
+      grafLinhas([{ nome: m.nome, cor: m.cor, pontos: pontos }],
+        { unidade: m.unidade === 'volume' ? 'volume' : '', desdeZero: m.unidade === 'kg' ? false : true,
+          titulo: m.nome + ' de ' + e.nome }) +
+      '<div class="linha entre" style="margin-top:12px">' +
+        '<div class="centro crescer"><div style="font-size:18px;font-weight:700" class="nums">' +
+          formatar(ultimo) + '</div><div class="mini fraco">último</div></div>' +
+        '<div class="centro crescer"><div style="font-size:18px;font-weight:700" class="nums">' +
+          formatar(maximo) + '</div><div class="mini fraco">melhor no período</div></div>' +
+        '<div class="centro crescer"><div style="font-size:18px;font-weight:700" class="nums">' +
+          pontos.length + '</div><div class="mini fraco">treinos</div></div>' +
+      '</div></div>';
   }
 
-  if (m) {
-    var est = m.serieDo1RM ? estimar1RM(m.serieDo1RM.peso, m.serieDo1RM.reps) : null;
-    html += '<div class="cartao"><h3>Melhor de sempre</h3>' +
-      '<div class="linha entre" style="margin-bottom:10px">' +
-        '<div class="centro crescer"><div style="font-size:20px;font-weight:700" class="nums">' +
-          kg(m.pesoMax) + '</div><div class="mini fraco">peso × ' +
-          (m.serieDoPesoMax ? m.serieDoPesoMax.reps : '?') + '</div></div>' +
-        '<div class="centro crescer"><div style="font-size:20px;font-weight:700" class="nums">' +
-          kg(m.melhor1RM) + '</div><div class="mini fraco">1RM estimado</div></div>' +
-        '<div class="centro crescer"><div style="font-size:20px;font-weight:700" class="nums">' +
-          num(m.totalSeries, 0) + '</div><div class="mini fraco">séries</div></div>' +
-      '</div>';
-    if (est) {
-      html += '<div class="mini fraco">1RM da melhor série (' + kg(m.serieDo1RM.peso) + ' × ' +
-        m.serieDo1RM.reps + '): Epley ' + kg(est.epley) + ' · Brzycki ' +
-        (est.brzycki === null ? '—' : kg(est.brzycki)) +
-        (est.fiavel ? '' : ' · acima de 15 reps a estimativa vale pouco') + '</div>';
-    }
-    html += '</div>';
-  }
-
-  html += '<div class="cartao"><h3>Peso máximo e 1RM estimado</h3>' +
-    grafLinhas([
-      { nome: 'Peso máximo', cor: '#3b82f6',
-        pontos: pontos.filter(function (p) { return p.pesoMax !== null; })
-          .map(function (p) { return { x: p.data, y: p.pesoMax }; }) },
-      { nome: '1RM estimado', cor: '#22c55e',
-        pontos: pontos.filter(function (p) { return p.melhor1RM !== null; })
-          .map(function (p) { return { x: p.data, y: p.melhor1RM }; }) }
-    ], { desdeZero: false, titulo: 'Progressão de ' + e.nome }) + '</div>';
-
-  html += '<div class="cartao"><h3>Volume por treino</h3>' +
-    grafLinhas([{ nome: 'Volume', cor: '#f59e0b',
-      pontos: pontos.map(function (p) { return { x: p.data, y: p.volume }; }) }],
-      { unidade: 'volume', altura: 220, titulo: 'Volume de ' + e.nome }) + '</div>';
-
-  var comRir = pontos.filter(function (p) { return p.rirMedio !== null; });
-  if (comRir.length > 1) {
-    html += '<div class="cartao"><h3>RIR médio por treino</h3>' +
-      grafLinhas([{ nome: 'RIR', cor: '#06b6d4',
-        pontos: comRir.map(function (p) { return { x: p.data, y: p.rirMedio }; }) }],
-        { altura: 200, titulo: 'Esforço em ' + e.nome }) +
-      '<p class="mini fraco" style="margin:10px 0 0">Mais baixo é mais perto da falha.</p></div>';
-  }
+  html += htmlTabelaRepMax(e.id);
 
   corpo.innerHTML = html;
   $('#trocarEx').onclick = trocarExercicioAnalise;
+  ligarSeletorDePeriodo();
+  Array.prototype.forEach.call(document.querySelectorAll('[data-metrica]'), function (b) {
+    b.onclick = function () { Estado.metricaAnalise = b.dataset.metrica; render(); };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-reps]'), function (b) {
+    b.onclick = function () { Estado.repsDaMetrica = +b.dataset.reps; render(); };
+  });
+  ligarLinhasDeSerie();
 }
 
 function trocarExercicioAnalise() {
@@ -3491,12 +3717,18 @@ function trocarExercicioAnalise() {
         lista.innerHTML = '<div class="lista">' + visiveis.map(function (e) {
           return '<button class="item" data-exa="' + e.id + '">' +
             '<div class="crescer"><div style="font-weight:600">' + esc(e.nome) + '</div>' +
-            '<div class="mini fraco">' + esc(e.grupo) + ' · ' + plural(contas[e.id], 'série', 'séries') + '</div></div>' +
+            '<div class="mini fraco">' + esc(e.grupo) + ' · ' +
+              plural(contas[e.id], 'série', 'séries') + '</div></div>' +
             '<span class="seta">&#8250;</span></button>';
         }).join('') + '</div>';
         Array.prototype.forEach.call(lista.querySelectorAll('[data-exa]'), function (b) {
           b.onclick = function () {
             Estado.exercicioAnalise = +b.dataset.exa;
+            // As repeticoes escolhidas podem nao existir no exercicio novo.
+            var feitas = curvaDe(Estado.exercicioAnalise).repsFeitas;
+            if (feitas.length && feitas.indexOf(Estado.repsDaMetrica) === -1) {
+              Estado.repsDaMetrica = feitas[Math.floor(feitas.length / 2)];
+            }
             fecharFolha(); render();
           };
         });
@@ -3507,10 +3739,11 @@ function trocarExercicioAnalise() {
 }
 
 function analiseEsforco(corpo) {
-  var rir = mediaRir(Estado.series);
+  var rir = mediaRir(seriesDoPeriodo());
+  var html = seletorDePeriodo();
 
   if (!rir.comRir) {
-    corpo.innerHTML = '<div class="cartao"><h3>Ainda sem RIR</h3>' +
+    corpo.innerHTML = html + '<div class="cartao"><h3>Ainda sem RIR</h3>' +
       '<p class="suave" style="margin:0">O histórico que veio do FitNotes não traz RIR: ' +
       'a app tinha a coluna mas nunca foi preenchida, nas ' + num(Estado.series.length, 0) +
       ' séries todas.</p>' +
@@ -3518,13 +3751,13 @@ function analiseEsforco(corpo) {
       'média por treino, média por exercício e a evolução ao longo do tempo.</p>' +
       '<p class="mini fraco" style="margin-bottom:0">RIR é quantas repetições ainda davas ' +
       'quando paraste. RIR 0 é ir à falha; RIR 3 é parar com três no bolso.</p></div>';
+    ligarSeletorDePeriodo();
     return;
   }
 
-  var recentes = rir.porSessao.slice(-60);
-  var html = '<div class="cartao"><h3>RIR médio por treino</h3>' +
+  html += '<div class="cartao"><h3>RIR médio por treino · ' + esc(nomeDoPeriodo()) + '</h3>' +
     grafLinhas([{ nome: 'RIR médio', cor: '#06b6d4',
-      pontos: recentes.map(function (s) { return { x: s.data, y: s.media }; }) }],
+      pontos: rir.porSessao.map(function (s) { return { x: s.data, y: s.media }; }) }],
       { titulo: 'Esforço ao longo do tempo' }) +
     '<p class="mini fraco" style="margin:10px 0 0">Mais baixo é mais perto da falha. ' +
     'Uma linha que sobe devagar costuma querer dizer fadiga acumulada ou pesos que já sabem a pouco.' +
@@ -3539,13 +3772,13 @@ function analiseEsforco(corpo) {
       num(rir.porSessao.length, 0) + '</div><div class="mini fraco">treinos</div></div>' +
     '</div></div>';
 
-  // RIR medio por exercicio, do mais duro para o mais folgado
   var linhas = Object.keys(rir.porExercicio).map(function (id) {
     var e = exercicioPorId(+id);
     return {
       nome: e ? e.nome : 'Exercício apagado',
       valor: rir.porExercicio[id].media,
-      texto: num(rir.porExercicio[id].media, 1) + ' · ' + plural(rir.porExercicio[id].series, 'série', 'séries'),
+      texto: num(rir.porExercicio[id].media, 1) + ' · ' +
+        plural(rir.porExercicio[id].series, 'série', 'séries'),
       cor: e ? corDoGrupo(e.grupo) : '#64748b'
     };
   }).sort(function (a, b) { return a.valor - b.valor; }).slice(0, 15);
@@ -3555,23 +3788,37 @@ function analiseEsforco(corpo) {
       grafBarrasH(linhas) + '</div>';
   }
   corpo.innerHTML = html;
+  ligarSeletorDePeriodo();
 }
 
 function analiseRecordes(corpo) {
-  var prs = detetarRecordes(Estado.series);
-  if (!prs.length) { corpo.innerHTML = '<p class="vazio">Ainda não há recordes.</p>'; return; }
+  var intervalo = intervaloAtual();
+  var prs = detetarRecordes(Estado.series)
+    .filter(function (r) {
+      if (intervalo.de && r.data < intervalo.de) return false;
+      if (intervalo.ate && r.data > intervalo.ate) return false;
+      return true;
+    });
 
-  var recentes = prs.slice().reverse().slice(0, 60);
+  var html = seletorDePeriodo();
+
+  if (!prs.length) {
+    corpo.innerHTML = html + '<p class="vazio">Nenhum recorde neste período.</p>';
+    ligarSeletorDePeriodo();
+    return;
+  }
+
   var porSerie = {};
   Estado.series.forEach(function (s) { porSerie[s.id] = s; });
 
-  var html = '<div class="cartao"><h3>Como se conta um recorde</h3>' +
+  html += '<div class="cartao"><h3>' + plural(prs.length, 'recorde', 'recordes') + ' · ' +
+    esc(nomeDoPeriodo()) + '</h3>' +
     '<p class="mini suave" style="margin:0">Uma série é recorde quando nenhuma anterior do mesmo ' +
-    'exercício a bate ao mesmo tempo no peso e nas repetições. É a mesma regra que o FitNotes usa: ' +
-    'foi conferida contra os ' + num(prs.length, 0) + ' recordes que ele já tinha marcado.</p></div>';
+    'exercício a bate ao mesmo tempo no peso e nas repetições. É a mesma regra que o FitNotes ' +
+    'usa: foi conferida contra os recordes que ele já tinha marcado.</p></div>';
 
-  html += '<div class="lista"><div class="cab">Últimos recordes</div>' +
-    recentes.map(function (pr) {
+  html += '<div class="lista">' +
+    prs.slice().reverse().slice(0, 80).map(function (pr) {
       var s = porSerie[pr.serieId];
       var e = exercicioPorId(pr.exercicioId);
       if (!s) return '';
@@ -3583,7 +3830,221 @@ function analiseRecordes(corpo) {
     }).join('') + '</div>';
 
   corpo.innerHTML = html;
+  ligarSeletorDePeriodo();
   ligarLinhasDeSerie();
+}
+
+/* --------------------------------------------------------------------------
+   Analises: peso corporal e o objetivo
+
+   O grafico mostra duas linhas: o peso real e a linha do que era preciso para
+   chegar ao objetivo a tempo. Ver as duas juntas diz mais do que qualquer
+   numero — se a linha do peso esta por baixo da do objetivo, esta a correr
+   bem; se esta por cima, nao.
+   ----------------------------------------------------------------------- */
+
+function analisePeso(corpo) {
+  var todas = Estado.pesagens.slice()
+    .sort(function (a, b) { return a.data < b.data ? -1 : 1; });
+  var objetivo = Estado.definicoes.objetivoPeso || null;
+  // O progresso conta-se sempre com o historico todo: o peso de agora e o
+  // mais recente que exista, venha do periodo que vier.
+  var progresso = progressoObjetivoPeso(todas, objetivo, hojeIso());
+
+  // O grafico, esse, respeita o periodo escolhido — senao um objetivo de hoje
+  // aparecia com seis anos de nada pelo meio.
+  var intervalo = intervaloAtual();
+  var pesagens = filtrarPorIntervalo(todas.map(function (p) {
+    return { data: p.data, kg: p.kg, id: p.id };
+  }), intervalo);
+
+  var html = seletorDePeriodo() +
+    '<div class="cartao">' +
+    '<div class="linha" style="gap:8px;align-items:flex-end">' +
+      '<label class="campo crescer" style="margin:0"><span>Peso de hoje (kg)</span>' +
+        '<input id="pcValor" type="number" inputmode="decimal" step="any" placeholder="' +
+        (pesagens.length ? num(pesagens[pesagens.length - 1].kg, 1) : '75,0') + '"></label>' +
+      '<button class="btn primaria" id="pcGuardar" style="flex:none">Registar</button>' +
+    '</div></div>';
+
+  if (!todas.length && !objetivo) {
+    corpo.innerHTML = html +
+      '<p class="vazio">Ainda não há pesagens.<br>Regista a primeira aqui em cima.</p>' +
+      '<button class="btn larga" id="pcObjetivo">Definir um objetivo</button>';
+    ligarPeso();
+    return;
+  }
+
+  /* --- O objetivo --- */
+  if (progresso) {
+    var faltaTexto = progresso.atingido ? 'Objetivo atingido'
+      : num(Math.abs(progresso.falta), 1) + ' kg ' + (progresso.falta < 0 ? 'a perder' : 'a ganhar');
+    var cor = progresso.atingido ? 'var(--verde)'
+      : progresso.adiantado ? 'var(--verde)' : 'var(--ambar)';
+
+    html += '<div class="cartao"><h3>Objetivo: ' + num(progresso.alvo, 1) + ' kg até ' +
+      esc(dataCurta(objetivo.ate)) + '</h3>' +
+      '<div style="height:9px;background:var(--sup3);border-radius:99px;overflow:hidden">' +
+        '<div style="height:100%;width:' + progresso.percentagem.toFixed(1) +
+        '%;background:' + cor + ';border-radius:99px"></div></div>' +
+      '<div class="linha entre mini" style="margin-top:6px">' +
+        '<span class="fraco">' + num(progresso.pesoInicial, 1) + ' kg</span>' +
+        '<span style="color:' + cor + ';font-weight:700">' +
+          num(progresso.percentagem, 0) + '%</span>' +
+        '<span class="fraco">' + num(progresso.alvo, 1) + ' kg</span>' +
+      '</div>' +
+      '<div class="linha entre" style="margin-top:14px">' +
+        '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
+          num(progresso.pesoAtual, 1) + '</div><div class="mini fraco">agora</div></div>' +
+        '<div class="centro crescer"><div style="font-size:19px;font-weight:700;color:' + cor +
+          '" class="nums">' + esc(faltaTexto.split(' ')[0]) + '</div>' +
+          '<div class="mini fraco">' + esc(progresso.atingido ? 'atingido' :
+            faltaTexto.split(' ').slice(1).join(' ')) + '</div></div>' +
+        '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
+          (progresso.diasRestantes > 0 ? progresso.diasRestantes : 0) +
+          '</div><div class="mini fraco">dias</div></div>' +
+      '</div>';
+
+    if (!progresso.atingido) {
+      html += '<p class="pequeno" style="margin:12px 0 0;color:' + cor + '">' +
+        (progresso.adiantado
+          ? 'A cumprir. Para hoje, o esperado era ' + num(progresso.pesoEsperadoHoje, 1) + ' kg.'
+          : 'Atrasado. Para hoje, o esperado era ' + num(progresso.pesoEsperadoHoje, 1) + ' kg.') +
+        '</p>';
+      if (progresso.ritmoSemanalNecessario !== null) {
+        html += '<p class="mini fraco" style="margin:6px 0 0">Daqui para a frente dá ' +
+          num(Math.abs(progresso.ritmoSemanalNecessario), 2) + ' kg por semana.</p>';
+      } else {
+        html += '<p class="mini fraco" style="margin:6px 0 0">A data do objetivo já passou.</p>';
+      }
+    }
+    html += '</div>';
+  }
+
+  /* --- O grafico: peso real e linha do objetivo --- */
+  if (pesagens.length > 1 || progresso) {
+    var linhas = [{
+      nome: 'Peso', cor: '#22c55e',
+      pontos: pesagens.map(function (p) { return { x: p.data, y: p.kg }; })
+    }];
+    if (progresso) {
+      linhas.push({ nome: 'Objetivo', cor: '#f59e0b', pontos: progresso.linha });
+    }
+    html += '<div class="cartao"><h3>Evolução · ' + esc(nomeDoPeriodo()) + '</h3>' +
+      grafLinhas(linhas, { altura: 220, desdeZero: false, legenda: true,
+        titulo: 'Peso corporal' }) +
+      (pesagens.length < todas.length
+        ? '<p class="mini fraco" style="margin:10px 0 0">' +
+          plural(todas.length - pesagens.length, 'pesagem fora', 'pesagens fora') +
+          ' deste período. Escolhe "Tudo" para as ver.</p>'
+        : '') +
+      '</div>';
+  }
+
+  /* --- Numeros --- */
+  if (todas.length) {
+    var primeira = todas[0], ultima = todas[todas.length - 1];
+    var diferenca = ultima.kg - primeira.kg;
+    html += '<div class="cartao"><h3>Desde sempre</h3><div class="linha entre">' +
+      '<div class="centro crescer"><div style="font-size:20px;font-weight:700" class="nums">' +
+        num(ultima.kg, 1) + '</div><div class="mini fraco">' + esc(dataCurta(ultima.data)) +
+        '</div></div>' +
+      '<div class="centro crescer"><div style="font-size:20px;font-weight:700" class="nums">' +
+        (diferenca >= 0 ? '+' : '') + num(diferenca, 1) + '</div><div class="mini fraco">desde ' +
+        esc(dataCurta(primeira.data)) + '</div></div>' +
+      '<div class="centro crescer"><div style="font-size:20px;font-weight:700" class="nums">' +
+        pesagens.length + '</div><div class="mini fraco">pesagens</div></div>' +
+      '</div></div>';
+  }
+
+  html += '<button class="btn larga" id="pcObjetivo">' +
+    (objetivo ? 'Mudar o objetivo' : 'Definir um objetivo') + '</button>';
+
+  if (todas.length) {
+    html += '<div class="lista" style="margin-top:12px"><div class="cab">Últimas pesagens</div>' +
+      todas.slice(-10).reverse().map(function (p) {
+        return '<button class="item" data-pesagem="' + p.id + '">' +
+          '<span class="crescer">' + esc(dataLonga(p.data)) + '</span>' +
+          '<span class="nums" style="font-weight:600">' + num(p.kg, 1) + ' kg</span>' +
+          '<span class="seta">&#8250;</span></button>';
+      }).join('') + '</div>';
+  }
+
+  corpo.innerHTML = html;
+  ligarPeso();
+}
+
+function ligarPeso() {
+  var guardar = $('#pcGuardar');
+  if (guardar) {
+    guardar.onclick = function () {
+      var v = parseFloat($('#pcValor').value);
+      if (!Number.isFinite(v) || v <= 0) { avisar('Falta o peso'); return; }
+      registarPeso(hojeIso(), Math.round(v * 10) / 10);
+    };
+  }
+  var obj = $('#pcObjetivo');
+  if (obj) obj.onclick = editarObjetivoPeso;
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-pesagem]'), function (b) {
+    b.onclick = function () { editarPesagem(+b.dataset.pesagem); };
+  });
+  ligarSeletorDePeriodo();
+}
+
+function editarObjetivoPeso() {
+  var o = Estado.definicoes.objetivoPeso || {};
+  var pesagens = Estado.pesagens.slice().sort(function (a, b) { return a.data < b.data ? -1 : 1; });
+  var agora = pesagens.length ? pesagens[pesagens.length - 1].kg : null;
+
+  // Por defeito, tres meses a partir de hoje.
+  var daquiATresMeses = recuarDias(hojeIso(), -91);
+
+  abrirFolha(o.kg ? 'Mudar o objetivo' : 'Definir um objetivo',
+    '<label class="campo"><span>Quero chegar a (kg)</span>' +
+      '<input id="obKg" type="number" inputmode="decimal" step="any" value="' +
+      (Number.isFinite(o.kg) ? o.kg : '') + '" placeholder="' +
+      (agora !== null ? num(agora - 3, 1) : '72,0') + '"></label>' +
+    '<label class="campo"><span>Até</span>' +
+      '<input id="obAte" type="date" value="' + (o.ate || daquiATresMeses) +
+      '" min="' + hojeIso() + '"></label>' +
+    '<label class="campo"><span>A contar de que peso</span>' +
+      '<input id="obInicial" type="number" inputmode="decimal" step="any" value="' +
+      (Number.isFinite(o.pesoInicial) ? o.pesoInicial : (agora !== null ? agora : '')) + '">' +
+      '</label>' +
+    '<p class="mini fraco">O peso de partida é o ponto por onde a linha do objetivo começa. ' +
+    'Por defeito é o teu peso mais recente.</p>' +
+    '<button class="btn primaria larga" id="obGuardar">Guardar objetivo</button>' +
+    (o.kg ? '<button class="btn perigo larga" id="obApagar" style="margin-top:8px">' +
+      'Apagar objetivo</button>' : ''),
+    function (corpo) {
+      corpo.querySelector('#obGuardar').onclick = function () {
+        var kgAlvo = parseFloat(corpo.querySelector('#obKg').value);
+        var ate = corpo.querySelector('#obAte').value;
+        var inicial = parseFloat(corpo.querySelector('#obInicial').value);
+        if (!Number.isFinite(kgAlvo) || kgAlvo <= 0) { avisar('Falta o peso do objetivo'); return; }
+        if (!ate) { avisar('Falta a data'); return; }
+        if (!Number.isFinite(inicial) || inicial <= 0) { avisar('Falta o peso de partida'); return; }
+        if (ate <= hojeIso()) { avisar('A data tem de ser no futuro'); return; }
+
+        guardarDefinicao('objetivoPeso', {
+          kg: Math.round(kgAlvo * 10) / 10,
+          ate: ate,
+          // Mudar o objetivo recomeça a contagem de hoje: senão a linha vinha
+          // de um ponto de partida que já não é o que se decidiu agora.
+          desde: (o.kg && o.ate === ate && o.pesoInicial === inicial && o.desde)
+            ? o.desde : hojeIso(),
+          pesoInicial: Math.round(inicial * 10) / 10
+        }).then(function () { fecharFolha(); avisar('Objetivo guardado'); render(); });
+      };
+      var apagar = corpo.querySelector('#obApagar');
+      if (apagar) {
+        apagar.onclick = function () {
+          guardarDefinicao('objetivoPeso', null)
+            .then(function () { fecharFolha(); avisar('Objetivo apagado'); render(); });
+        };
+      }
+    });
 }
 
 /* ===========================================================================
@@ -3591,6 +4052,10 @@ function analiseRecordes(corpo) {
    ======================================================================== */
 
 function renderExercicios() {
+  // Dois niveis: primeiro os grupos, depois os exercicios do grupo escolhido.
+  // Com 131 exercicios, a lista toda de uma vez era uma parede.
+  if (Estado.grupoAberto) return renderExerciciosDoGrupo(Estado.grupoAberto);
+
   $('#titulo').textContent = 'Exercícios';
   $('#btVoltar').hidden = true;
   var acao = $('#btAcao');
@@ -3602,39 +4067,97 @@ function renderExercicios() {
   Estado.exercicios.filter(function (e) { return !e.arquivado; })
     .forEach(function (e) { (porGrupo[e.grupo] = porGrupo[e.grupo] || []).push(e); });
 
-  var contas = {};
-  Estado.series.forEach(function (s) { contas[s.exercicioId] = (contas[s.exercicioId] || 0) + 1; });
+  var seriesPorGrupo = {};
+  Estado.series.forEach(function (s) {
+    var e = exercicioPorId(s.exercicioId);
+    if (!e) return;
+    seriesPorGrupo[e.grupo] = (seriesPorGrupo[e.grupo] || 0) + 1;
+  });
 
-  var html = '';
   var nomes = Object.keys(porGrupo).sort(function (a, b) {
     var ia = GRUPOS_APP.indexOf(a), ib = GRUPOS_APP.indexOf(b);
     return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || a.localeCompare(b);
   });
 
+  var html = '';
   if (!nomes.length) {
-    html += '<p class="vazio">Ainda não há exercícios.<br>Importa o histórico ou cria o primeiro.</p>';
+    html = '<p class="vazio">Ainda não há exercícios.<br>Importa o histórico ou cria o primeiro.</p>';
+  } else {
+    html = '<label class="campo"><span>Procurar exercício</span>' +
+      '<input id="exProc" type="search" placeholder="agachamento, supino…" autocomplete="off">' +
+      '</label><div id="exResultado"></div>' +
+      '<div class="lista" id="exGrupos">' + nomes.map(function (g) {
+        return '<button class="item" data-grupo="' + esc(g) + '">' +
+          '<span style="width:10px;height:10px;border-radius:3px;flex:none;background:' +
+            corDoGrupo(g) + '"></span>' +
+          '<div class="crescer"><div style="font-weight:600">' + esc(g) + '</div>' +
+          '<div class="mini fraco">' + plural(porGrupo[g].length, 'exercício', 'exercícios') +
+          ' · ' + plural(seriesPorGrupo[g] || 0, 'série', 'séries') + '</div></div>' +
+          '<span class="seta">&#8250;</span></button>';
+      }).join('') + '</div>';
   }
 
-  nomes.forEach(function (g) {
-    html += '<div class="lista"><div class="cab">' + esc(g) + ' · ' + porGrupo[g].length + '</div>' +
-      porGrupo[g].sort(function (a, b) { return a.nome.localeCompare(b.nome); })
-        .map(function (e) {
-          var m = melhores()[e.id];
-          return '<button class="item" data-ficha="' + e.id + '">' +
-            '<div class="crescer"><div style="font-weight:600">' + esc(e.nome) + '</div>' +
-            '<div class="mini fraco">' + plural(contas[e.id] || 0, 'série', 'séries') +
-            (m ? ' · melhor ' + kg(m.pesoMax) : '') + '</div></div>' +
-            '<span class="seta">&#8250;</span></button>';
-        }).join('') + '</div>';
-  });
-
-  // Os dados e as cópias de segurança viviam aqui em baixo; passaram para
-  // as Definições, que é onde se vai procurá-los.
   $('#v-exercicios').innerHTML = html;
 
+  Array.prototype.forEach.call(document.querySelectorAll('[data-grupo]'), function (b) {
+    b.onclick = function () { Estado.grupoAberto = b.dataset.grupo; render(); };
+  });
+
+  // A procura atravessa os grupos: quem sabe o nome nao devia ter de se
+  // lembrar em que grupo o pôs.
+  var proc = $('#exProc');
+  if (proc) {
+    proc.oninput = function () {
+      var termo = normalizarCabecalho(proc.value);
+      var alvo = $('#exResultado'), grupos = $('#exGrupos');
+      if (!termo) { alvo.innerHTML = ''; grupos.hidden = false; return; }
+      grupos.hidden = true;
+      var achados = Estado.exercicios.filter(function (e) {
+        return !e.arquivado && normalizarCabecalho(e.nome).indexOf(termo) !== -1;
+      }).sort(function (a, b) { return a.nome.localeCompare(b.nome); });
+      alvo.innerHTML = achados.length
+        ? '<div class="lista">' + achados.map(itemDaFicha).join('') + '</div>'
+        : '<p class="vazio pequeno">Nenhum exercício com esse nome.</p>';
+      ligarFichas();
+    };
+  }
+}
+
+/* Uma linha de exercicio, com o que ele ja levou de series e a melhor marca. */
+function itemDaFicha(e) {
+  var m = melhores()[e.id];
+  var n = seriesDoExercicio(e.id).length;
+  return '<button class="item" data-ficha="' + e.id + '">' +
+    '<div class="crescer"><div style="font-weight:600">' + esc(e.nome) + '</div>' +
+    '<div class="mini fraco">' + plural(n, 'série', 'séries') +
+    (m ? ' · melhor ' + kg(m.pesoMax) : '') + '</div></div>' +
+    '<span class="seta">&#8250;</span></button>';
+}
+
+function ligarFichas() {
   Array.prototype.forEach.call(document.querySelectorAll('[data-ficha]'), function (b) {
     b.onclick = function () { fichaExercicio(+b.dataset.ficha); };
   });
+}
+
+function renderExerciciosDoGrupo(grupo) {
+  $('#titulo').textContent = grupo;
+  $('#btVoltar').hidden = false;
+  var acao = $('#btAcao');
+  acao.hidden = false;
+  acao.textContent = 'Novo';
+  acao.onclick = function () { editarExercicio(null); };
+
+  var doGrupo = Estado.exercicios
+    .filter(function (e) { return !e.arquivado && e.grupo === grupo; })
+    .sort(function (a, b) { return a.nome.localeCompare(b.nome); });
+
+  var html = doGrupo.length
+    ? '<div class="lista">' + doGrupo.map(itemDaFicha).join('') + '</div>'
+    : '<p class="vazio">Este grupo ficou sem exercícios.</p>';
+
+  $('#v-exercicios').innerHTML = html;
+  ligarFichas();
 }
 
 /* Ha quanto tempo foi o ultimo backup, e em que estado esta o armazenamento.
@@ -3807,7 +4330,6 @@ function renderDefinicoes() {
 
   $('#v-definicoes').innerHTML =
     cartaoDados() +
-    cartaoPesoCorporal() +
     cartaoDescanso() +
     cartaoVersao() +
     cartaoArmazenamento() +
@@ -3824,59 +4346,6 @@ function cartaoDados() {
     '<button class="btn larga fina" id="dExportarJson" style="margin-top:8px">Guardar backup (JSON)</button>' +
     '<button class="btn larga fina" id="dExportarCsv" style="margin-top:8px">Guardar em CSV</button>' +
     estadoDoBackup() + '</div>';
-}
-
-/* --- Peso corporal ---
-   Os 118 registos que vieram do FitNotes estavam guardados e sem forma
-   nenhuma de os ver. Aqui veem-se e acrescentam-se. */
-function cartaoPesoCorporal() {
-  var pesagens = Estado.pesagens.slice()
-    .sort(function (a, b) { return a.data < b.data ? -1 : 1; });
-  var ultima = pesagens[pesagens.length - 1];
-
-  var html = '<div class="cartao"><h3>Peso corporal</h3>' +
-    '<div class="linha" style="gap:8px;align-items:flex-end">' +
-      '<label class="campo crescer" style="margin:0"><span>Hoje (kg)</span>' +
-        '<input id="pcValor" type="number" inputmode="decimal" step="any" placeholder="' +
-        (ultima ? num(ultima.kg) : '75,0') + '"></label>' +
-      '<button class="btn primaria" id="pcGuardar" style="flex:none">Registar</button>' +
-    '</div>';
-
-  if (!pesagens.length) {
-    html += '<p class="mini fraco" style="margin:12px 0 0">Ainda não há pesagens.</p>';
-    return html + '</div>';
-  }
-
-  var primeira = pesagens[0];
-  var diferenca = ultima.kg - primeira.kg;
-
-  html += '<div class="linha entre" style="margin-top:14px">' +
-    '<div class="centro crescer"><div style="font-size:20px;font-weight:700" class="nums">' +
-      num(ultima.kg, 1) + '</div><div class="mini fraco">' + esc(dataCurta(ultima.data)) + '</div></div>' +
-    '<div class="centro crescer"><div style="font-size:20px;font-weight:700" class="nums">' +
-      (diferenca >= 0 ? '+' : '') + num(diferenca, 1) + '</div><div class="mini fraco">desde ' +
-      esc(dataCurta(primeira.data)) + '</div></div>' +
-    '<div class="centro crescer"><div style="font-size:20px;font-weight:700" class="nums">' +
-      pesagens.length + '</div><div class="mini fraco">pesagens</div></div>' +
-    '</div>';
-
-  if (pesagens.length > 1) {
-    html += '<div style="margin-top:12px">' + grafLinhas([{
-      nome: 'Peso', cor: '#22c55e',
-      pontos: pesagens.map(function (p) { return { x: p.data, y: p.kg }; })
-    }], { altura: 170, desdeZero: false, titulo: 'Peso corporal' }) + '</div>';
-  }
-
-  // As ultimas, para se poder corrigir uma que tenha ficado mal.
-  html += '<div class="lista" style="margin:12px 0 0"><div class="cab">Últimas</div>' +
-    pesagens.slice(-6).reverse().map(function (p) {
-      return '<button class="item" data-pesagem="' + p.id + '">' +
-        '<span class="crescer">' + esc(dataLonga(p.data)) + '</span>' +
-        '<span class="nums" style="font-weight:600">' + num(p.kg, 1) + ' kg</span>' +
-        '<span class="seta">&#8250;</span></button>';
-    }).join('') + '</div>';
-
-  return html + '</div>';
 }
 
 /* --- Descanso por defeito, para exercicios que nao tenham o seu --- */
@@ -3943,21 +4412,11 @@ function ligarDefinicoes() {
   $('#dExportarCsv').onclick = exportarCsv;
   $('#dProcurarVersao').onclick = procurarAtualizacao;
 
-  $('#pcGuardar').onclick = function () {
-    var v = parseFloat($('#pcValor').value);
-    if (!Number.isFinite(v) || v <= 0) { avisar('Falta o peso'); return; }
-    registarPeso(hojeIso(), Math.round(v * 10) / 10);
-  };
-
   $('#dsGuardar').onclick = function () {
     var v = parseInt($('#dsValor').value, 10);
     if (!Number.isFinite(v) || v <= 0) { avisar('Valor inválido'); return; }
     guardarDefinicao('descansoPadraoSeg', v).then(function () { avisar('Guardado'); });
   };
-
-  Array.prototype.forEach.call(document.querySelectorAll('[data-pesagem]'), function (b) {
-    b.onclick = function () { editarPesagem(+b.dataset.pesagem); };
-  });
 
   $('#dApagarTudo').onclick = function () {
     confirmar('Apagar todos os dados',
@@ -4238,6 +4697,9 @@ function csvCampo(valor) {
    ======================================================================== */
 
 function trocarVista(nome) {
+  // Sair de um separador desfaz o nivel em que se estava dentro dele: voltar
+  // aos Exercicios deve dar a lista dos grupos, nao o grupo de ha uma hora.
+  if (nome !== Estado.vista) Estado.grupoAberto = null;
   Estado.vista = nome;
   if (nome !== 'treino') Estado.exercicioAtivo = null;
   Array.prototype.forEach.call(document.querySelectorAll('#separadores button'), function (b) {
@@ -4326,7 +4788,10 @@ function arrancar() {
 
   // Cabecalho
   $('#btVoltar').onclick = function () {
-    Estado.exercicioAtivo = null;
+    // O mesmo botao serve os dois sitios onde se entra um nivel: o registo de
+    // um exercicio no treino, e um grupo muscular nos Exercicios.
+    if (Estado.vista === 'exercicios') Estado.grupoAberto = null;
+    else Estado.exercicioAtivo = null;
     render();
   };
 

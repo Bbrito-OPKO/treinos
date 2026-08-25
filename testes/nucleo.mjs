@@ -24,7 +24,9 @@ const NOMES = [
   'LBS_PARA_KG', 'traduzirGrupo', 'GRUPOS_APP', 'GRUPOS_CONHECIDOS',
   'serieFeita', 'importarFitNotes', 'detetarRecordes', 'melhoresPorExercicio',
   'curvaRepMax', 'melhorPesoParaReps', 'recordesPorReps',
-  'agregarPorPeriodo', 'mediaRir', 'progressaoExercicio'
+  'agregarPorPeriodo', 'mediaRir', 'progressaoExercicio', 'pesoPorDiaParaReps',
+  'recuarDias', 'PERIODOS', 'intervaloDoPeriodo', 'filtrarPorIntervalo',
+  'progressoObjetivoPeso'
 ];
 
 function extrair() {
