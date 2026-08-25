@@ -1365,11 +1365,21 @@ var Estado = {
 var Armazenamento = {
   noEcraPrincipal: false,
   persistente: null,      // true, false, ou null quando o browser nao diz
+  noIOS: false,
 
   verificar: function () {
     // O iOS usa navigator.standalone; os outros usam a media query.
     this.noEcraPrincipal = window.navigator.standalone === true ||
       (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+
+    var ua = navigator.userAgent || '';
+    // O iPad recente diz que e um Mac; distingue-se por ter ecra tactil.
+    this.noIOS = /iPad|iPhone|iPod/.test(ua) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+    // Nota para quem mexer nisto: no iPhone cada separador e cada icone do
+    // ecra principal tem o seu armazenamento proprio. O que se regista num
+    // sitio pode nao estar no outro — dai o aviso falar disso.
 
     var eu = this;
     if (!navigator.storage || !navigator.storage.persist) return Promise.resolve();
@@ -1382,15 +1392,26 @@ var Armazenamento = {
   /* O aviso que aparece enquanto a app nao estiver no ecra principal. */
   aviso: function () {
     if (this.noEcraPrincipal) return '';
-    return '<div class="cartao" style="border-color:var(--ambar)">' +
-      '<h3 style="color:var(--ambar)">Ainda não está no ecrã principal</h3>' +
-      '<p class="pequeno suave" style="margin:0">No iPhone, o Safari apaga os dados de um ' +
-      'site ao fim de 7 dias sem lá voltares. Uma app adicionada ao ecrã principal está ' +
-      'isenta disso.</p>' +
-      '<p class="pequeno suave">Partilhar &rsaquo; Adicionar ao ecrã principal. ' +
-      'Depois abre-a sempre pelo ícone.</p>' +
-      '<p class="mini fraco" style="margin-bottom:0">Enquanto isso não acontecer, guarda ' +
-      'um backup em Exercícios &rsaquo; Dados.</p></div>';
+
+    var html = '<div class="cartao" style="border-color:var(--ambar)">' +
+      '<h3 style="color:var(--ambar)">Estás num separador, não no ícone</h3>' +
+      '<p class="pequeno suave" style="margin:0">No iPhone, os dados de um separador ' +
+      'são apagados ao fim de 7 dias sem lá voltares. Uma app aberta pelo ícone do ecrã ' +
+      'principal está isenta disso.</p>' +
+      '<p class="pequeno suave">Partilhar &rsaquo; Adicionar ao ecrã principal — e depois ' +
+      '<b>abre sempre pelo ícone</b>. Se já a adicionaste, abre-a por lá: este aviso não ' +
+      'aparece na versão do ícone.</p>';
+
+    // Cada separador e cada icone tem o seu armazenamento proprio no iOS. Se
+    // ele registar treinos aqui, podem nao estar do outro lado.
+    if (this.noIOS && Estado.series.length) {
+      html += '<p class="mini fraco">O que registares aqui pode não aparecer no ícone: ' +
+        'no iPhone cada um tem o seu armazenamento. Se este separador tem treinos que o ' +
+        'ícone não tem, guarda um backup em Exercícios &rsaquo; Dados e importa-o lá.</p>';
+    }
+
+    return html + '<p class="mini fraco" style="margin-bottom:0">Guarda um backup de vez ' +
+      'em quando, de qualquer forma.</p></div>';
   }
 };
 
