@@ -31,11 +31,24 @@
   --barra:60px;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;padding:0;height:100%}
+html{height:100%}
+/* A app e uma coluna de altura fixa: cabecalho, conteudo que rola por dentro,
+   e barra de separadores. NADA disto e position:fixed de proposito.
+
+   Porque: no iPhone, um elemento fixo salta de sitio quando o teclado abre e
+   quando a pagina faz o efeito de borracha no fim do scroll. Numa coluna
+   flex com o conteudo a rolar por dentro, a barra nao tem por onde fugir —
+   nao esta a flutuar sobre nada, esta encostada ao fundo da coluna.
+
+   dvh e a altura visivel de verdade no iOS; o 100% e a rede para browsers
+   antigos que nao o conhecem. */
 body{
+  margin:0; padding:0;
+  height:100%; height:100dvh;
+  display:flex; flex-direction:column; overflow:hidden;
   background:var(--fundo); color:var(--texto);
   font:400 17px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
-  overscroll-behavior-y:none; -webkit-font-smoothing:antialiased;
+  overscroll-behavior:none; -webkit-font-smoothing:antialiased;
 }
 /* O iOS so nao da zoom nos inputs se a letra tiver 16px ou mais. */
 input,select,textarea,button{font:inherit;font-size:17px;color:inherit}
@@ -47,7 +60,7 @@ a{color:var(--azul)}
    2. Estrutura: cabecalho fixo, conteudo, barra de separadores em baixo
    ------------------------------------------------------------------------ */
 #cabecalho{
-  position:fixed; top:0; left:0; right:0; z-index:40;
+  flex:none; z-index:40;
   padding:calc(var(--topo) + 10px) 16px 10px;
   background:rgba(11,13,16,.82); backdrop-filter:saturate(180%) blur(20px);
   -webkit-backdrop-filter:saturate(180%) blur(20px);
@@ -55,18 +68,38 @@ a{color:var(--azul)}
   display:flex; align-items:center; gap:12px; min-height:52px;
 }
 #cabecalho h1{font-size:20px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* Cabecalho de um dia de treino: uma seta de cada lado da data para andar
+   dia a dia, e a data ao meio que abre o calendario. */
+#cabecalho .dia{flex:1;min-width:0;display:flex;align-items:center;gap:2px}
+/* Sem isto o display:flex ganha ao [hidden] e a barra de datas ficava sempre
+   à vista. Foi assim que a tira das cargas máximas se recusou a esconder. */
+#cabecalho .dia[hidden]{display:none}
+#cabecalho .dia .andar{flex:none;width:36px;height:38px;border-radius:9px;
+  display:flex;align-items:center;justify-content:center;
+  color:var(--azul);font-size:22px;line-height:1}
+#cabecalho .dia .andar:active{background:var(--sup2)}
+#cabecalho .dia .andar[disabled]{color:var(--fraco);opacity:.4}
+#cabecalho .dia .data{flex:1;min-width:0;text-align:center;font-size:17px;
+  font-weight:650;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;padding:8px 2px;border-radius:9px}
+#cabecalho .dia .data:active{background:var(--sup2)}
+#cabecalho .dia .data small{display:block;font-size:11px;font-weight:500;
+  color:var(--fraco);letter-spacing:0}
 #cabecalho .acao{color:var(--azul);font-size:16px;font-weight:500;padding:8px;margin:-8px;white-space:nowrap}
 #cabecalho .voltar{color:var(--azul);font-size:17px;padding:8px 8px 8px 0;margin-left:-8px}
 
 #conteudo{
-  padding:calc(var(--topo) + 74px) 0 calc(var(--barra) + var(--fundo-seg) + 24px);
-  min-height:100%;
+  flex:1; min-height:0;
+  overflow-y:auto; -webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain;
+  padding:14px 0 24px;
 }
 .vista{display:none;padding:0 16px}
 .vista.ativa{display:block}
 
 #separadores{
-  position:fixed; left:0; right:0; bottom:0; z-index:40;
+  flex:none; z-index:40;
   height:calc(var(--barra) + var(--fundo-seg));
   padding-bottom:var(--fundo-seg);
   background:rgba(11,13,16,.9); backdrop-filter:saturate(180%) blur(20px);
@@ -135,42 +168,22 @@ a{color:var(--azul)}
 
 /* Cabecalho de um exercicio dentro do treino: o nome abre o registo, e ao
    lado ficam o tirar e o pôr uma serie. */
-.cab-ex{display:flex;align-items:center;gap:6px;padding:11px 12px 11px 14px;
+.cab-ex{display:flex;align-items:center;gap:6px;padding:9px 12px 9px 14px;
   border-bottom:1px solid var(--borda)}
-.cab-ex > button.nome{flex:1;min-width:0;text-align:left;display:flex;
+/* O nome encolhe ate ao que precisa, para a seta ficar logo a seguir a ele.
+   O empurrao para a direita e dado ao primeiro dos botoes redondos. */
+.cab-ex > button.nome{flex:0 1 auto;min-width:0;text-align:left;display:flex;
   align-items:center;gap:10px}
 .cab-ex > button.nome:active{opacity:.55}
+.cab-ex .abrir{flex:none;width:30px;align-self:stretch;min-height:38px;
+  display:flex;align-items:center;justify-content:center;
+  color:var(--fraco);font-size:20px;line-height:1;margin-right:auto}
+.cab-ex .abrir:active{color:var(--azul)}
 .mini-b{width:36px;height:36px;flex:none;border-radius:9px;background:var(--sup3);
   color:var(--suave);font-size:19px;font-weight:600;line-height:1;
   display:flex;align-items:center;justify-content:center}
 .mini-b:active{background:var(--azul);color:#fff}
 .mini-b.tirar:active{background:var(--vermelho);color:#fff}
-
-/* Tira das marcas por numero de repeticoes, debaixo do nome do exercicio.
-   Rola de lado quando ha muitas — mais vale rolar do que encolher a letra
-   ate nao se ler. */
-.tira-pr{display:flex;gap:5px;overflow-x:auto;-webkit-overflow-scrolling:touch;
-  padding:7px 12px 8px;border-bottom:1px solid var(--borda);scrollbar-width:none}
-/* Sem esta linha o display:flex acima ganha ao [hidden]{display:none} do
-   browser e a tira fica sempre a vista, mesmo com o atributo posto. */
-.tira-pr[hidden]{display:none}
-.tira-pr::-webkit-scrollbar{display:none}
-.tira-pr .pr{flex:none;display:flex;align-items:baseline;gap:3px;
-  background:var(--sup2);border-radius:7px;padding:4px 7px;
-  font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
-.tira-pr .pr b{color:var(--fraco);font-weight:600;font-size:11px}
-.tira-pr .pr i{color:var(--ambar);font-weight:700;font-style:normal}
-.tira-pr .pr.hoje{background:rgba(245,158,11,.16)}
-.tira-pr .rot{flex:none;align-self:center;font-size:10px;font-weight:700;
-  color:var(--fraco);text-transform:uppercase;letter-spacing:.04em;padding-right:2px}
-
-/* Campos */
-.campo{display:block;margin-bottom:14px}
-.campo > span{display:block;font-size:13px;color:var(--suave);margin-bottom:6px;font-weight:600}
-.campo input,.campo select,.campo textarea{
-  width:100%;background:var(--sup2);border:1px solid var(--borda);border-radius:var(--raio-s);
-  padding:12px 14px;min-height:48px;outline:none}
-.campo input:focus,.campo select:focus,.campo textarea:focus{border-color:var(--azul)}
 
 /* ---------------------------------------------------------------------------
    4. Registo de serie: os tres campos grandes e os passos +/-
@@ -350,6 +363,12 @@ a{color:var(--azul)}
 <header id="cabecalho">
   <button class="voltar" id="btVoltar" hidden>&#8249; Voltar</button>
   <h1 id="titulo">Treino</h1>
+  <!-- Substitui o título nos dias de treino: setas e data que abre o calendário -->
+  <div class="dia" id="navDia" hidden>
+    <button class="andar" id="diaAntes" aria-label="dia anterior">&#8249;</button>
+    <button class="data" id="diaData"></button>
+    <button class="andar" id="diaDepois" aria-label="dia seguinte">&#8250;</button>
+  </div>
   <button class="acao" id="btAcao" hidden></button>
 </header>
 
@@ -366,6 +385,9 @@ a{color:var(--azul)}
 
   <!-- ===================== EXERCICIOS ===================== -->
   <section class="vista" id="v-exercicios"></section>
+
+  <!-- ===================== PESO CORPORAL ===================== -->
+  <section class="vista" id="v-peso"></section>
 
   <!-- ===================== DEFINICOES ===================== -->
   <section class="vista" id="v-definicoes"></section>
@@ -393,6 +415,10 @@ a{color:var(--azul)}
   <button data-vista="analises">
     <svg viewBox="0 0 24 24"><path d="M4 19.5V11M9.3 19.5V5M14.7 19.5v-6M20 19.5V8"/></svg>
     Análises
+  </button>
+  <button data-vista="peso">
+    <svg viewBox="0 0 24 24"><path d="M6.2 8.5h11.6l2.2 11.5a1 1 0 0 1-1 1.2H5a1 1 0 0 1-1-1.2z"/><circle cx="12" cy="5.2" r="2.6"/></svg>
+    Peso
   </button>
   <button data-vista="exercicios">
     <svg viewBox="0 0 24 24"><path d="M4 6.5h16M4 12h16M4 17.5h16"/><circle cx="8" cy="6.5" r="1.6" fill="currentColor" stroke="none"/><circle cx="14" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="10" cy="17.5" r="1.6" fill="currentColor" stroke="none"/></svg>
@@ -2073,12 +2099,9 @@ function renderDia() {
   var series = seriesDoDia(data);
   var ex = exercicioPorId;
 
-  $('#titulo').textContent = dataRelativa(data);
   $('#btVoltar').hidden = true;
-  var acao = $('#btAcao');
-  acao.hidden = false;
-  acao.textContent = 'Dia';
-  acao.onclick = escolherDia;
+  $('#btAcao').hidden = true;
+  mostrarNavDia(data);
 
   var html = Armazenamento.aviso();
 
@@ -2116,17 +2139,16 @@ function renderDia() {
     porEx.forEach(function (bloco) {
       var e = ex(bloco.id);
       var nome = e ? e.nome : 'Exercício apagado';
-      var grupo = e ? e.grupo : '';
       html += '<div class="lista">' +
         '<div class="cab-ex">' +
           // O nome abre e fecha as cargas maximas; a seta e que leva ao ecra
           // do exercicio.
-          '<button class="nome" data-marcas-de="' + bloco.id + '">' +
-            '<span class="crescer"><span style="font-weight:600;display:block">' + esc(nome) + '</span>' +
-            '<span class="mini fraco">' + esc(grupo) + ' · ' +
-              plural(bloco.series.length, 'série', 'séries') + ' · máx</span></span>' +
+          // Só o nome: o grupo e o número de séries já se veem nas linhas
+          // logo por baixo, e a linha ficava carregada de repetido.
+          '<button class="nome" data-abrir-ex="' + bloco.id + '">' +
+            '<span style="font-weight:600">' + esc(nome) + '</span>' +
           '</button>' +
-          '<button class="mini-b" data-abrir-ex="' + bloco.id + '" ' +
+          '<button class="abrir" data-abrir-ex="' + bloco.id + '" ' +
             'aria-label="abrir o exercício">&#8250;</button>' +
           '<button class="mini-b tirar" data-tirar-serie="' + bloco.id + '" ' +
             'aria-label="tirar uma série">&minus;</button>' +
@@ -2134,9 +2156,6 @@ function renderDia() {
             'aria-label="acrescentar uma série">+</button>' +
         '</div>';
       var tipoBloco = tipoDoExercicio(e);
-      if (tipoBloco === 'peso_reps') {
-        html += tiraDeMarcas(bloco.id, bloco.series.map(function (s) { return s.reps; }));
-      }
       html += cabecalhoDasLinhas(tipoBloco);
       bloco.series.forEach(function (s, i) {
         html += linhaEditavel(s, i + 1, prs[s.id], tipoBloco);
@@ -2171,16 +2190,6 @@ function renderDia() {
     b.onclick = function () {
       Estado.exercicioAtivo = +b.dataset.abrirEx;
       render();
-    };
-  });
-  // Abrir e fechar as cargas maximas sem refazer o ecra: assim nao se perde
-  // a posicao da lista a meio de um treino.
-  Array.prototype.forEach.call(document.querySelectorAll('[data-marcas-de]'), function (b) {
-    b.onclick = function () {
-      var tira = document.querySelector('[data-marcas="' + b.dataset.marcasDe + '"]');
-      if (!tira) { avisar('Ainda não há marcas neste exercício'); return; }
-      tira.hidden = !tira.hidden;
-      vibrar(8);
     };
   });
   Array.prototype.forEach.call(document.querySelectorAll('[data-por-serie]'), function (b) {
@@ -2244,25 +2253,6 @@ function cabecalhoDasLinhas(tipo) {
   // Cinco colunas, as mesmas da linha: n, kg, reps, feito, RIR
   return '<div class="linhas-cab">' +
     '<span></span><span>kg</span><span>reps</span><span>feito</span><span>RIR</span></div>';
-}
-
-/* A tira com a carga maxima para cada numero de repeticoes, para se ver de
-   relance o que ha a bater sem sair do treino. As repeticoes que se estao a
-   fazer hoje neste exercicio ficam realcadas. */
-function tiraDeMarcas(exercicioId, repsDeHoje) {
-  var linhas = marcasDe(exercicioId);
-  if (!linhas.length) return '';
-
-  var hoje = {};
-  (repsDeHoje || []).forEach(function (r) { if (Number.isFinite(r)) hoje[r] = true; });
-
-  // Fechada por defeito: abre-se ao carregar no nome do exercicio.
-  return '<div class="tira-pr" data-marcas="' + exercicioId + '" hidden>' +
-    '<span class="rot">máx</span>' +
-    linhas.map(function (l) {
-      return '<span class="pr' + (hoje[l.reps] ? ' hoje' : '') + '">' +
-        '<b>' + l.reps + '×</b><i>' + num(l.peso) + '</i></span>';
-    }).join('') + '</div>';
 }
 
 /* Um campo com o menos e o mais dentro da mesma caixa. */
@@ -2420,11 +2410,11 @@ function ligarLinhasEditaveis() {
       // o volume, por isso o ecra tem de ser refeito. Mas a posicao da lista
       // e guardada: confirmar quinze series a uma e a saltar para o topo de
       // cada vez seria insuportavel.
-      var posicao = window.scrollY;
+      var posicao = $('#conteudo').scrollTop;
       reindexar();
       BD.guardar('series', s).then(function () {
         render();
-        window.scrollTo(0, posicao);
+        $('#conteudo').scrollTop = posicao;
       });
       if (s.feita) {
         var pr = recordes()[s.id];
@@ -2478,11 +2468,11 @@ function acrescentarSerie(exercicioId) {
 
   Estado.series.push(nova);
   reindexar();
-  var posicao = window.scrollY;
+  var posicao = $('#conteudo').scrollTop;
   BD.guardar('series', nova).then(function () {
     vibrar(12);
     render();
-    window.scrollTo(0, posicao);
+    $('#conteudo').scrollTop = posicao;
   });
 }
 
@@ -2500,12 +2490,12 @@ function tirarUltimaSerie(exercicioId) {
   function tirar() {
     Estado.series = Estado.series.filter(function (s) { return s.id !== ultima.id; });
     reindexar();
-    var posicao = window.scrollY;
+    var posicao = $('#conteudo').scrollTop;
     BD.apagar('series', ultima.id).then(function () {
       avisar('Série tirada');
       vibrar(12);
       render();
-      window.scrollTo(0, posicao);
+      $('#conteudo').scrollTop = posicao;
     });
   }
 
@@ -2928,6 +2918,10 @@ function renderRegisto() {
       '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
         m.totalSeries + '</div><div class="mini fraco">séries feitas</div></div>' +
       '</div></div>';
+    // A carga maxima para cada numero de repeticoes vive aqui, no ecra do
+    // exercicio — que e onde se vai ver o que ha a bater antes de carregar
+    // a barra.
+    html += htmlTabelaRepMax(e.id);
   } else if (tipo !== 'peso_reps' && todas.length) {
     var maisLongo = todas.reduce(function (a, s) {
       return (Number.isFinite(s.tempoSeg) && (!a || s.tempoSeg > a.tempoSeg)) ? s : a;
@@ -3314,23 +3308,114 @@ function maisUsados() {
 /* --------------------------------------------------------------------------
    Mudar o dia que se esta a ver
    ----------------------------------------------------------------------- */
+/* O cabecalho de um dia de treino: seta, data, seta.
+   A data ao meio abre o calendario. As setas andam um dia de cada vez — e o
+   gesto que mais se faz, e obrigar a abrir uma folha para isso era de mais. */
+function mostrarNavDia(data) {
+  $('#titulo').hidden = true;
+  var nav = $('#navDia');
+  nav.hidden = false;
+
+  var relativa = dataRelativa(data);
+  var longa = dataLonga(data);
+  // Quando diz "Hoje" ou "Ontem", a data completa vai por baixo em pequeno.
+  $('#diaData').innerHTML = relativa === longa
+    ? esc(longa)
+    : esc(relativa) + '<small>' + esc(longa) + '</small>';
+
+  // Nao se anda para depois de hoje: nao ha treinos no futuro para ver.
+  $('#diaDepois').disabled = data >= hojeIso();
+
+  $('#diaAntes').onclick = function () { andarDia(-1); };
+  $('#diaDepois').onclick = function () { andarDia(1); };
+  $('#diaData').onclick = escolherDia;
+}
+
+function esconderNavDia() {
+  $('#navDia').hidden = true;
+  $('#titulo').hidden = false;
+}
+
+function andarDia(passo) {
+  var nova = recuarDias(Estado.dataAtual, -passo);
+  if (nova > hojeIso()) return;
+  Estado.dataAtual = nova;
+  Estado.exercicioAtivo = null;
+  vibrar(8);
+  render();
+}
+
+/* Calendario para saltar para um dia qualquer, com os dias de treino a azul. */
 function escolherDia() {
-  abrirFolha('Dia do treino',
-    '<label class="campo"><span>Data</span>' +
-      '<input id="dData" type="date" value="' + Estado.dataAtual + '"></label>' +
-    '<button class="btn primaria larga" id="dOk">Ver este dia</button>' +
-    '<button class="btn larga" id="dHoje" style="margin-top:8px">Voltar a hoje</button>',
+  var comTreino = {};
+  Estado.series.forEach(function (s) { comTreino[s.data] = true; });
+  var mes = Estado.dataAtual.slice(0, 7);
+
+  abrirFolha('Ir para',
+    '<div id="edCal"></div>' +
+    '<button class="btn primaria larga" id="edHoje">Voltar a hoje</button>',
     function (corpo) {
-      corpo.querySelector('#dOk').onclick = function () {
-        var v = corpo.querySelector('#dData').value;
-        if (v) { Estado.dataAtual = v; Estado.exercicioAtivo = null; }
-        fecharFolha(); render();
-      };
-      corpo.querySelector('#dHoje').onclick = function () {
-        Estado.dataAtual = hojeIso(); Estado.exercicioAtivo = null;
+      var cal = corpo.querySelector('#edCal');
+
+      function desenhar() {
+        var ano = +mes.slice(0, 4), m = +mes.slice(5, 7);
+        var recuo = (new Date(Date.UTC(ano, m - 1, 1)).getUTCDay() + 6) % 7;
+        var diasNoMes = new Date(Date.UTC(ano, m, 0)).getUTCDate();
+
+        var html = '<div class="cartao" style="margin-top:0">' +
+          '<div class="linha entre" style="margin-bottom:12px">' +
+            '<button class="btn fina" id="edAntes">&#8249;</button>' +
+            '<h3 style="margin:0;text-transform:none;font-size:17px;color:var(--texto)">' +
+              esc(MESES[m - 1] + ' ' + ano) + '</h3>' +
+            '<button class="btn fina" id="edDepois"' +
+              (mes >= hojeIso().slice(0, 7) ? ' disabled' : '') + '>&#8250;</button>' +
+          '</div><div class="calendario">' +
+          ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'].map(function (x) {
+            return '<div class="dn">' + x + '</div>';
+          }).join('');
+
+        for (var i = 0; i < recuo; i++) html += '<button class="fora"></button>';
+        for (var dia = 1; dia <= diasNoMes; dia++) {
+          var iso = ano + '-' + String(m).padStart(2, '0') + '-' + String(dia).padStart(2, '0');
+          var classes = [];
+          if (comTreino[iso]) classes.push('treino');
+          if (iso === hojeIso()) classes.push('hoje');
+          if (iso === Estado.dataAtual) classes.push('sel');
+          html += '<button class="' + classes.join(' ') + '" data-ir="' + iso + '"' +
+            (iso > hojeIso() ? ' disabled' : '') + '>' + dia + '</button>';
+        }
+        html += '</div><p class="mini fraco centro" style="margin:12px 0 0">' +
+          'Os dias a azul têm treino.</p></div>';
+        cal.innerHTML = html;
+
+        cal.querySelector('#edAntes').onclick = function () { mes = mesVizinho(mes, -1); desenhar(); };
+        var depois = cal.querySelector('#edDepois');
+        if (!depois.disabled) depois.onclick = function () { mes = mesVizinho(mes, 1); desenhar(); };
+
+        Array.prototype.forEach.call(cal.querySelectorAll('[data-ir]'), function (b) {
+          if (b.disabled) return;
+          b.onclick = function () {
+            Estado.dataAtual = b.dataset.ir;
+            Estado.exercicioAtivo = null;
+            fecharFolha(); render();
+          };
+        });
+      }
+
+      desenhar();
+      corpo.querySelector('#edHoje').onclick = function () {
+        Estado.dataAtual = hojeIso();
+        Estado.exercicioAtivo = null;
         fecharFolha(); render();
       };
     });
+}
+
+function mesVizinho(mes, passo) {
+  var ano = +mes.slice(0, 4), m = +mes.slice(5, 7) + passo;
+  if (m < 1) { m = 12; ano--; }
+  if (m > 12) { m = 1; ano++; }
+  return ano + '-' + String(m).padStart(2, '0');
 }
 
 /* ===========================================================================
@@ -3440,7 +3525,6 @@ var ABAS_ANALISE = [
   { chave: 'volume', nome: 'Volume' },
   { chave: 'exercicio', nome: 'Exercício' },
   { chave: 'esforco', nome: 'Esforço' },
-  { chave: 'peso', nome: 'Peso' },
   { chave: 'recordes', nome: 'Recordes' }
 ];
 
@@ -3529,9 +3613,6 @@ function renderAnalises() {
   });
 
   var corpo = $('#corpoAnalise');
-
-  // O peso corporal nao depende de haver treinos.
-  if (Estado.abaAnalises === 'peso') return analisePeso(corpo);
 
   if (!Estado.series.length) {
     corpo.innerHTML = '<p class="vazio">Ainda não há treinos.<br>' +
@@ -3842,6 +3923,13 @@ function analiseRecordes(corpo) {
    numero — se a linha do peso esta por baixo da do objetivo, esta a correr
    bem; se esta por cima, nao.
    ----------------------------------------------------------------------- */
+
+function renderPeso() {
+  $('#titulo').textContent = 'Peso corporal';
+  $('#btVoltar').hidden = true;
+  $('#btAcao').hidden = true;
+  analisePeso($('#v-peso'));
+}
 
 function analisePeso(corpo) {
   var todas = Estado.pesagens.slice()
@@ -4708,14 +4796,18 @@ function trocarVista(nome) {
   Array.prototype.forEach.call(document.querySelectorAll('.vista'), function (v) {
     v.classList.toggle('ativa', v.id === 'v-' + nome);
   });
-  window.scrollTo(0, 0);
+  $('#conteudo').scrollTop = 0;
   render();
 }
 
 function render() {
+  // A barra de datas so aparece na lista de um dia; quem a quiser volta a
+  // mostra-la. Assim nenhum ecra tem de se lembrar de a esconder.
+  esconderNavDia();
   if (Estado.vista === 'treino') renderTreino();
   else if (Estado.vista === 'historico') renderHistorico();
   else if (Estado.vista === 'analises') renderAnalises();
+  else if (Estado.vista === 'peso') renderPeso();
   else if (Estado.vista === 'definicoes') renderDefinicoes();
   else renderExercicios();
 }
