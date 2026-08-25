@@ -130,6 +130,19 @@ a{color:var(--azul)}
   color:var(--suave);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--borda)}
 .seta{color:var(--fraco);font-size:19px;line-height:1}
 
+/* Cabecalho de um exercicio dentro do treino: o nome abre o registo, e ao
+   lado ficam o tirar e o pôr uma serie. */
+.cab-ex{display:flex;align-items:center;gap:6px;padding:11px 12px 11px 14px;
+  border-bottom:1px solid var(--borda)}
+.cab-ex > button.nome{flex:1;min-width:0;text-align:left;display:flex;
+  align-items:center;gap:10px}
+.cab-ex > button.nome:active{opacity:.55}
+.mini-b{width:36px;height:36px;flex:none;border-radius:9px;background:var(--sup3);
+  color:var(--suave);font-size:19px;font-weight:600;line-height:1;
+  display:flex;align-items:center;justify-content:center}
+.mini-b:active{background:var(--azul);color:#fff}
+.mini-b.tirar:active{background:var(--vermelho);color:#fff}
+
 /* Campos */
 .campo{display:block;margin-bottom:14px}
 .campo > span{display:block;font-size:13px;color:var(--suave);margin-bottom:6px;font-weight:600}
@@ -180,28 +193,33 @@ a{color:var(--azul)}
    relance. A marca a bater vai para uma linha propria por baixo: assim os
    botoes tem espaco e o numero fica explicado em vez de solto. */
 .linhas-cab,.serie-ed{display:grid;
-  grid-template-columns:13px 25px minmax(46px,1fr) 25px 25px 38px 25px 38px 23px 30px 23px;
-  gap:3px;align-items:center}
+  grid-template-columns:13px 1fr .8fr 38px .72fr;
+  gap:4px;align-items:center}
 .linhas-cab{padding:7px 10px 3px;font-size:10px;font-weight:700;color:var(--fraco);
   text-transform:uppercase;letter-spacing:.03em}
 .linhas-cab span{text-align:center}
 .serie-ed{padding:6px 10px 8px;border-bottom:1px solid var(--borda)}
 .serie-ed:last-child{border-bottom:0}
 .serie-ed .n{font-size:12px;font-weight:700;color:var(--fraco);text-align:center}
-.serie-ed input{width:100%;background:var(--sup2);border:1px solid var(--borda);
-  border-radius:8px;padding:8px 2px;min-height:42px;text-align:center;outline:none;
-  font-size:16px;font-weight:600;font-variant-numeric:tabular-nums;-moz-appearance:textfield}
-.serie-ed input::-webkit-outer-spin-button,.serie-ed input::-webkit-inner-spin-button{
-  -webkit-appearance:none;margin:0}
-.serie-ed input:focus{border-color:var(--azul)}
-.serie-ed input.rir{color:var(--suave)}
-.serie-ed input.rir::placeholder{color:var(--fraco);font-weight:400}
 
-/* Os menos e os mais. Estreitos mas com a altura toda da linha, para o dedo
-   ter onde cair mesmo com pouca largura. */
-.serie-ed .passo-b{min-height:42px;border-radius:7px;background:var(--sup3);
-  color:var(--suave);font-size:17px;font-weight:600;line-height:1;
-  display:flex;align-items:center;justify-content:center;padding:0}
+/* Cada campo e uma caixa so, com o menos e o mais la dentro: e uma peca
+   unica em vez de tres botoes soltos lado a lado. */
+.serie-ed .caixa{display:grid;grid-template-columns:26px 1fr 26px;align-items:stretch;
+  background:var(--sup2);border:1px solid var(--borda);border-radius:9px;
+  overflow:hidden;min-height:44px}
+.serie-ed .caixa:focus-within{border-color:var(--azul)}
+.serie-ed .caixa input{width:100%;background:none;border:0;border-radius:0;padding:0 1px;
+  text-align:center;outline:none;font-size:16px;font-weight:600;
+  font-variant-numeric:tabular-nums;-moz-appearance:textfield;color:inherit}
+.serie-ed .caixa input::-webkit-outer-spin-button,
+.serie-ed .caixa input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.serie-ed .caixa input.rir{color:var(--suave)}
+.serie-ed .caixa input.rir::placeholder{color:var(--fraco);font-weight:400}
+
+/* Os menos e os mais ocupam a altura toda da caixa: estreitos de largura,
+   mas com area que chegue para o dedo. */
+.serie-ed .passo-b{background:none;color:var(--fraco);font-size:18px;font-weight:600;
+  line-height:1;display:flex;align-items:center;justify-content:center;padding:0}
 .serie-ed .passo-b:active{background:var(--azul);color:#fff}
 
 .serie-ed .feito{min-height:42px;border-radius:8px;border:1.5px solid var(--borda);
@@ -1848,11 +1866,18 @@ function renderDia() {
       var nome = e ? e.nome : 'Exercício apagado';
       var grupo = e ? e.grupo : '';
       html += '<div class="lista">' +
-        '<button class="item" data-abrir-ex="' + bloco.id + '">' +
-          '<div class="crescer"><div style="font-weight:600">' + esc(nome) + '</div>' +
-          '<div class="mini fraco">' + esc(grupo) + ' · ' + plural(bloco.series.length, 'série', 'séries') + '</div></div>' +
-          '<span class="seta">&#8250;</span>' +
-        '</button>';
+        '<div class="cab-ex">' +
+          '<button class="nome" data-abrir-ex="' + bloco.id + '">' +
+            '<span class="crescer"><span style="font-weight:600;display:block">' + esc(nome) + '</span>' +
+            '<span class="mini fraco">' + esc(grupo) + ' · ' +
+              plural(bloco.series.length, 'série', 'séries') + '</span></span>' +
+            '<span class="seta">&#8250;</span>' +
+          '</button>' +
+          '<button class="mini-b tirar" data-tirar-serie="' + bloco.id + '" ' +
+            'aria-label="tirar uma série">&minus;</button>' +
+          '<button class="mini-b" data-por-serie="' + bloco.id + '" ' +
+            'aria-label="acrescentar uma série">+</button>' +
+        '</div>';
       var tipoBloco = tipoDoExercicio(e);
       html += cabecalhoDasLinhas(tipoBloco);
       bloco.series.forEach(function (s, i) {
@@ -1889,6 +1914,12 @@ function renderDia() {
       Estado.exercicioAtivo = +b.dataset.abrirEx;
       render();
     };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-por-serie]'), function (b) {
+    b.onclick = function () { acrescentarSerie(+b.dataset.porSerie); };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-tirar-serie]'), function (b) {
+    b.onclick = function () { tirarUltimaSerie(+b.dataset.tirarSerie); };
   });
   ligarLinhasDeSerie();
   ligarLinhasEditaveis();
@@ -1933,18 +1964,23 @@ function curvaDe(exercicioId) {
 
 function cabecalhoDasLinhas(tipo) {
   if (tipo !== 'peso_reps') return '';
-  // Onze colunas, as mesmas da linha: n, -, kg, +, -, reps, +, feito, -, RIR, +
+  // Cinco colunas, as mesmas da linha: n, kg, reps, feito, RIR
   return '<div class="linhas-cab">' +
-    '<span></span><span></span><span>kg</span><span></span>' +
-    '<span></span><span>reps</span><span></span>' +
-    '<span>feito</span>' +
-    '<span></span><span>RIR</span><span></span></div>';
+    '<span></span><span>kg</span><span>reps</span><span>feito</span><span>RIR</span></div>';
 }
 
-/* Um menos e um mais a ladear um campo. */
-function botaoPasso(campo, delta, sinal) {
-  return '<button class="passo-b" data-ajuste="' + campo + ':' + delta + '" ' +
-    'aria-label="' + (delta < 0 ? 'diminuir ' : 'aumentar ') + campo + '">' + sinal + '</button>';
+/* Um campo com o menos e o mais dentro da mesma caixa. */
+function caixaComPassos(campo, passo, atributos, valor) {
+  var b = function (delta, sinal) {
+    return '<button class="passo-b" data-ajuste="' + campo + ':' + delta + '" ' +
+      'aria-label="' + (delta < 0 ? 'diminuir ' : 'aumentar ') + campo + '">' + sinal + '</button>';
+  };
+  return '<div class="caixa">' +
+    b(-passo, '&minus;') +
+    '<input type="number" data-campo="' + campo + '" ' + atributos +
+      ' value="' + (valor === null || valor === undefined ? '' : valor) + '">' +
+    b(passo, '+') +
+    '</div>';
 }
 
 function linhaEditavel(s, n, pr, tipo) {
@@ -1961,24 +1997,18 @@ function linhaEditavel(s, n, pr, tipo) {
       '" data-linha="' + s.id + '">' +
     '<div class="n">' + n + '</div>' +
 
-    botaoPasso('peso', -2.5, '&minus;') +
-    '<input type="number" inputmode="decimal" step="any" data-campo="peso" value="' +
-      (Number.isFinite(s.peso) ? s.peso : '') + '" aria-label="peso">' +
-    botaoPasso('peso', 2.5, '+') +
+    caixaComPassos('peso', 2.5, 'inputmode="decimal" step="any" aria-label="peso"',
+      Number.isFinite(s.peso) ? s.peso : null) +
 
-    botaoPasso('reps', -1, '&minus;') +
-    '<input type="number" inputmode="numeric" data-campo="reps" value="' +
-      (Number.isFinite(s.reps) ? s.reps : '') + '" aria-label="repetições">' +
-    botaoPasso('reps', 1, '+') +
+    caixaComPassos('reps', 1, 'inputmode="numeric" aria-label="repetições"',
+      Number.isFinite(s.reps) ? s.reps : null) +
 
     '<button class="feito' + (feita ? ' on' : '') + '" data-campo="feita" ' +
       'aria-label="marcar como feita">✓</button>' +
 
-    botaoPasso('rir', -1, '&minus;') +
-    '<input type="number" inputmode="numeric" class="rir" min="0" max="10" ' +
-      'data-campo="rir" placeholder="—" value="' +
-      (Number.isFinite(s.rir) ? s.rir : '') + '" aria-label="RIR">' +
-    botaoPasso('rir', 1, '+') +
+    caixaComPassos('rir', 1,
+      'inputmode="numeric" class="rir" min="0" max="10" placeholder="—" aria-label="RIR"',
+      Number.isFinite(s.rir) ? s.rir : null) +
 
     '<div class="marca' + (marca === null ? ' nada' : '') + '" data-campo="marca">' +
       textoDaMarca(s.reps, marca) + '</div>' +
@@ -2110,6 +2140,77 @@ function ligarLinhasDeSerie() {
   Array.prototype.forEach.call(document.querySelectorAll('[data-serie]'), function (el) {
     el.onclick = function () { editarSerie(+el.dataset.serie); };
   });
+}
+
+/* --------------------------------------------------------------------------
+   Acrescentar e tirar series a um exercicio, sem sair da lista do dia
+   ----------------------------------------------------------------------- */
+
+/* Acrescenta uma serie igual a ultima daquele exercicio, por fazer.
+   Por fazer de proposito: e uma serie que se vai fazer a seguir, e so conta
+   para as marcas depois do visto. */
+function acrescentarSerie(exercicioId) {
+  var doDia = seriesDoDia(Estado.dataAtual);
+  var deste = doDia.filter(function (s) { return s.exercicioId === exercicioId; });
+  var modelo = deste[deste.length - 1] || sugestaoAnterior(exercicioId);
+
+  var nova = {
+    id: proximoId(Estado.series),
+    sessaoId: garantirSessao(Estado.dataAtual).id,
+    exercicioId: exercicioId,
+    data: Estado.dataAtual,
+    ordemExercicio: deste.length ? deste[0].ordemExercicio
+      : new Set(doDia.map(function (s) { return s.exercicioId; })).size,
+    ordem: doDia.length,
+    peso: modelo && Number.isFinite(modelo.peso) ? modelo.peso : 0,
+    reps: modelo && Number.isFinite(modelo.reps) ? modelo.reps : null,
+    rir: null,
+    tempoSeg: modelo ? modelo.tempoSeg : null,
+    distancia: null,
+    supersetId: null,
+    nota: null,
+    feita: false
+  };
+
+  Estado.series.push(nova);
+  reindexar();
+  var posicao = window.scrollY;
+  BD.guardar('series', nova).then(function () {
+    vibrar(12);
+    render();
+    window.scrollTo(0, posicao);
+  });
+}
+
+/* Tira a ultima serie daquele exercicio no dia. So pergunta se a serie ja
+   estava dada como feita: tirar uma serie planeada e um gesto sem custo,
+   tirar uma feita e perder um registo. */
+function tirarUltimaSerie(exercicioId) {
+  var deste = seriesDoDia(Estado.dataAtual)
+    .filter(function (s) { return s.exercicioId === exercicioId; });
+  if (!deste.length) return;
+
+  var ultima = deste[deste.length - 1];
+  var e = exercicioPorId(exercicioId);
+
+  function tirar() {
+    Estado.series = Estado.series.filter(function (s) { return s.id !== ultima.id; });
+    reindexar();
+    var posicao = window.scrollY;
+    BD.apagar('series', ultima.id).then(function () {
+      avisar('Série tirada');
+      vibrar(12);
+      render();
+      window.scrollTo(0, posicao);
+    });
+  }
+
+  if (!estaFeita(ultima)) { tirar(); return; }
+
+  confirmar('Tirar uma série',
+    'A última série de ' + (e ? e.nome : 'este exercício') + ' está dada como feita: ' +
+    descreverSerie(ultima, tipoDoExercicio(e)) + '. Tirá-la apaga o registo.',
+    'Tirar', tirar);
 }
 
 /* Apaga o treino todo de um dia: as series e a propria sessao. */
