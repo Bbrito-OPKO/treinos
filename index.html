@@ -76,9 +76,12 @@ a{color:var(--azul)}
 }
 #separadores button{
   flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
-  gap:3px; color:var(--fraco); font-size:10.5px; font-weight:500; letter-spacing:.01em;
+  /* Letra e icone mais pequenos desde que passaram a ser cinco separadores:
+     com 10,5px, "Definições" nao cabia numa linha num telemovel estreito. */
+  gap:3px; color:var(--fraco); font-size:9.5px; font-weight:500; letter-spacing:0;
+  padding:0 2px; text-align:center; line-height:1.15;
 }
-#separadores button svg{width:25px;height:25px;stroke:currentColor;fill:none;stroke-width:1.9;
+#separadores button svg{width:23px;height:23px;stroke:currentColor;fill:none;stroke-width:1.9;
   stroke-linecap:round;stroke-linejoin:round}
 #separadores button.ativa{color:var(--azul)}
 
@@ -358,6 +361,9 @@ a{color:var(--azul)}
   <!-- ===================== EXERCICIOS ===================== -->
   <section class="vista" id="v-exercicios"></section>
 
+  <!-- ===================== DEFINICOES ===================== -->
+  <section class="vista" id="v-definicoes"></section>
+
 </main>
 
 <!-- Cronometro de descanso -->
@@ -385,6 +391,10 @@ a{color:var(--azul)}
   <button data-vista="exercicios">
     <svg viewBox="0 0 24 24"><path d="M4 6.5h16M4 12h16M4 17.5h16"/><circle cx="8" cy="6.5" r="1.6" fill="currentColor" stroke="none"/><circle cx="14" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="10" cy="17.5" r="1.6" fill="currentColor" stroke="none"/></svg>
     Exercícios
+  </button>
+  <button data-vista="definicoes">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.1"/><path d="M19.4 15a1.6 1.6 0 0 0 .32 1.77l.06.06a1.9 1.9 0 1 1-2.7 2.7l-.05-.06a1.6 1.6 0 0 0-1.78-.32 1.6 1.6 0 0 0-1 1.46V21a1.9 1.9 0 1 1-3.8 0v-.1A1.6 1.6 0 0 0 9.4 19.4a1.6 1.6 0 0 0-1.77.32l-.06.06a1.9 1.9 0 1 1-2.7-2.7l.06-.06a1.6 1.6 0 0 0 .32-1.77 1.6 1.6 0 0 0-1.46-1H3.3a1.9 1.9 0 1 1 0-3.8h.1a1.6 1.6 0 0 0 1.46-1.05 1.6 1.6 0 0 0-.32-1.77l-.06-.06a1.9 1.9 0 1 1 2.7-2.7l.06.06a1.6 1.6 0 0 0 1.77.32h.08a1.6 1.6 0 0 0 1-1.46V3.3a1.9 1.9 0 1 1 3.8 0v.1a1.6 1.6 0 0 0 1 1.46 1.6 1.6 0 0 0 1.77-.32l.06-.06a1.9 1.9 0 1 1 2.7 2.7l-.06.06a1.6 1.6 0 0 0-.32 1.77v.08a1.6 1.6 0 0 0 1.46 1H21a1.9 1.9 0 1 1 0 3.8h-.1a1.6 1.6 0 0 0-1.46 1z"/></svg>
+    Definições
   </button>
 </nav>
 
@@ -2404,6 +2414,78 @@ function diasComTreino() {
     .sort().reverse();
 }
 
+/* O treino de um dia por inteiro, em HTML: os números em cima e os exercícios
+   com os pesos por baixo. Serve a pre-visualizacao do historico e o painel do
+   escolhedor de copiar — e o mesmo desenho nos dois sitios. */
+function htmlDoTreino(data) {
+  var series = seriesDoDia(data);
+  if (!series.length) return '<p class="vazio pequeno">Este dia não tem séries.</p>';
+
+  var volume = series.reduce(function (t, s) {
+    return t + (Number.isFinite(s.peso) ? s.peso : 0) * (Number.isFinite(s.reps) ? s.reps : 0);
+  }, 0);
+  var comRir = series.filter(function (s) { return Number.isFinite(s.rir); });
+  var rirMedio = comRir.length
+    ? comRir.reduce(function (t, s) { return t + s.rir; }, 0) / comRir.length : null;
+
+  var porEx = [];
+  series.forEach(function (s) {
+    var b = porEx.find(function (x) { return x.id === s.exercicioId; });
+    if (!b) { b = { id: s.exercicioId, series: [] }; porEx.push(b); }
+    b.series.push(s);
+  });
+
+  var celula = function (valor, rotulo) {
+    return '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
+      valor + '</div><div class="mini fraco">' + rotulo + '</div></div>';
+  };
+
+  var prs = recordes();
+
+  return '<div class="cartao" style="margin-top:0"><div class="linha entre">' +
+      celula(series.length, 'séries') +
+      celula(porEx.length, 'exercícios') +
+      celula(volumeCurto(volume), 'volume') +
+      (rirMedio === null ? '' : celula(num(rirMedio, 1), 'RIR médio')) +
+    '</div></div>' +
+    '<div class="lista">' + porEx.map(function (bloco) {
+      var e = exercicioPorId(bloco.id);
+      var tipo = tipoDoExercicio(e);
+      var recordesAqui = bloco.series.filter(function (s) { return prs[s.id]; }).length;
+      var pesos = bloco.series.map(function (s) {
+        return descreverSerie(s, tipo).replace(/ kg/g, '').replace(' × ', '×');
+      }).join('   ');
+      return '<div class="item" style="display:block">' +
+        '<div class="linha entre"><span style="font-weight:600">' +
+          esc(e ? e.nome : 'Exercício apagado') + '</span>' +
+          (recordesAqui ? '<span class="etiqueta pr">' +
+            plural(recordesAqui, 'PR', 'PR') + '</span>' : '') + '</div>' +
+        '<div class="mini fraco nums" style="margin-top:2px">' + esc(pesos) + '</div></div>';
+    }).join('') + '</div>';
+}
+
+/* Pre-visualizacao de um treino, a partir do historico. */
+function verTreinoDoDia(data) {
+  abrirFolha(dataLonga(data),
+    htmlDoTreino(data) +
+    '<button class="btn primaria larga" id="vAbrir">Abrir este treino</button>' +
+    '<button class="btn larga" id="vCopiar" style="margin-top:8px">Copiar para hoje</button>',
+    function (corpo) {
+      corpo.querySelector('#vAbrir').onclick = function () {
+        fecharFolha();
+        Estado.dataAtual = data;
+        Estado.exercicioAtivo = null;
+        trocarVista('treino');
+      };
+      corpo.querySelector('#vCopiar').onclick = function () {
+        fecharFolha();
+        Estado.dataAtual = hojeIso();
+        Estado.exercicioAtivo = null;
+        copiarTreino(data);
+      };
+    });
+}
+
 /* Resumo de um dia, para se reconhecer o treino sem ter de o abrir. */
 function resumoDoDia(data) {
   var series = seriesDoDia(data);
@@ -2495,48 +2577,17 @@ function escolherTreinoParaCopiar() {
         });
       }
 
-      /* A mesma informacao que a lista dava, mas so do dia escolhido — e com
-         os exercicios todos, que na lista nao cabiam. */
+      /* O mesmo desenho da pre-visualizacao do historico, para nao haver
+         duas maneiras de mostrar o mesmo treino. */
       function desenharInfo() {
         if (!escolhido) {
           info.innerHTML = '<p class="vazio pequeno">Escolhe um dia a azul.</p>';
           return;
         }
-        var series = seriesDoDia(escolhido);
-        var volume = series.reduce(function (t, s) {
-          return t + (Number.isFinite(s.peso) ? s.peso : 0) * (Number.isFinite(s.reps) ? s.reps : 0);
-        }, 0);
-
-        var porEx = [];
-        series.forEach(function (s) {
-          var b = porEx.find(function (x) { return x.id === s.exercicioId; });
-          if (!b) { b = { id: s.exercicioId, series: [] }; porEx.push(b); }
-          b.series.push(s);
-        });
-
         info.innerHTML =
-          '<div class="cartao"><h3>' + esc(dataLonga(escolhido)) + '</h3>' +
-            '<div class="linha entre">' +
-            '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
-              series.length + '</div><div class="mini fraco">séries</div></div>' +
-            '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
-              porEx.length + '</div><div class="mini fraco">exercícios</div></div>' +
-            '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
-              volumeCurto(volume) + '</div><div class="mini fraco">volume</div></div>' +
-            '</div></div>' +
-          '<div class="lista">' + porEx.map(function (bloco) {
-            var e = exercicioPorId(bloco.id);
-            var pesos = bloco.series.map(function (s) {
-              if (Number.isFinite(s.reps) && Number.isFinite(s.peso)) {
-                return (s.peso > 0 ? num(s.peso) : 'corpo') + '×' + s.reps;
-              }
-              if (Number.isFinite(s.tempoSeg)) return duracaoCurta(s.tempoSeg);
-              return '—';
-            }).join('  ');
-            return '<div class="item" style="display:block">' +
-              '<div style="font-weight:600">' + esc(e ? e.nome : 'Exercício apagado') + '</div>' +
-              '<div class="mini fraco nums">' + esc(pesos) + '</div></div>';
-          }).join('') + '</div>' +
+          '<div class="cartao"><h3 style="margin-bottom:0;text-transform:none;font-size:16px;' +
+            'color:var(--texto)">' + esc(dataLonga(escolhido)) + '</h3></div>' +
+          htmlDoTreino(escolhido) +
           '<button class="btn primaria larga" id="copConfirmar">Copiar este treino</button>';
 
         info.querySelector('#copConfirmar').onclick = function () {
@@ -3225,13 +3276,11 @@ function renderHistorico() {
 
   $('#mesAnterior').onclick = function () { andarMes(-1); };
   $('#mesSeguinte').onclick = function () { andarMes(1); };
+  // Carregar num dia mostra primeiro o que la foi feito, em vez de saltar
+  // logo para dentro do treino.
   Array.prototype.forEach.call(document.querySelectorAll('[data-dia]'), function (b) {
     if (!b.dataset.dia) return;
-    b.onclick = function () {
-      Estado.dataAtual = b.dataset.dia;
-      Estado.exercicioAtivo = null;
-      trocarVista('treino');
-    };
+    b.onclick = function () { verTreinoDoDia(b.dataset.dia); };
   });
 }
 
@@ -3579,27 +3628,13 @@ function renderExercicios() {
         }).join('') + '</div>';
   });
 
-  html += '<div class="cartao" style="margin-top:6px"><h3>Dados</h3>' +
-    '<button class="btn larga fina" id="dImportarCsv">Importar CSV do FitNotes</button>' +
-    '<button class="btn larga fina" id="dImportarBackup" style="margin-top:8px">Importar backup (JSON)</button>' +
-    '<button class="btn larga fina" id="dExportarJson" style="margin-top:8px">Guardar backup (JSON)</button>' +
-    '<button class="btn larga fina" id="dExportarCsv" style="margin-top:8px">Guardar em CSV</button>' +
-    estadoDoBackup() + '</div>' +
-    '<div class="cartao"><h3>Versão</h3>' +
-    '<button class="btn larga fina" id="dProcurarVersao">Procurar atualização</button>' +
-    '<p class="mini fraco" style="margin:10px 0 0">A app procura sozinha de cada vez que ' +
-    'abre. Este botão serve para forçar, sem ter de fechar e abrir.</p></div>';
-
+  // Os dados e as cópias de segurança viviam aqui em baixo; passaram para
+  // as Definições, que é onde se vai procurá-los.
   $('#v-exercicios').innerHTML = html;
 
   Array.prototype.forEach.call(document.querySelectorAll('[data-ficha]'), function (b) {
     b.onclick = function () { fichaExercicio(+b.dataset.ficha); };
   });
-  $('#dImportarCsv').onclick = function () { pedirFicheiro('.csv,text/csv', importarCsvFicheiro); };
-  $('#dImportarBackup').onclick = function () { pedirFicheiro('.json,application/json', importarBackupFicheiro); };
-  $('#dExportarJson').onclick = exportarJson;
-  $('#dExportarCsv').onclick = exportarCsv;
-  $('#dProcurarVersao').onclick = procurarAtualizacao;
 }
 
 /* Ha quanto tempo foi o ultimo backup, e em que estado esta o armazenamento.
@@ -3753,6 +3788,227 @@ function editarExercicio(id) {
       };
       var apagar = corpo.querySelector('#xApagar');
       if (apagar) apagar.onclick = function () { apagarExercicio(id); };
+    });
+}
+
+
+/* ===========================================================================
+   Vista: Definicoes
+
+   Tudo o que nao e treinar: os dados, as cópias de segurança, a versão da
+   app, o descanso por defeito e o peso corporal. Estava metido a martelo no
+   fim dos Exercícios, que não é sítio para isso.
+   ======================================================================== */
+
+function renderDefinicoes() {
+  $('#titulo').textContent = 'Definições';
+  $('#btVoltar').hidden = true;
+  $('#btAcao').hidden = true;
+
+  $('#v-definicoes').innerHTML =
+    cartaoDados() +
+    cartaoPesoCorporal() +
+    cartaoDescanso() +
+    cartaoVersao() +
+    cartaoArmazenamento() +
+    cartaoPerigo();
+
+  ligarDefinicoes();
+}
+
+/* --- Dados: importar, exportar, e ha quanto tempo foi o ultimo backup --- */
+function cartaoDados() {
+  return '<div class="cartao" style="margin-top:0"><h3>Dados</h3>' +
+    '<button class="btn larga fina" id="dImportarCsv">Importar CSV do FitNotes</button>' +
+    '<button class="btn larga fina" id="dImportarBackup" style="margin-top:8px">Importar backup (JSON)</button>' +
+    '<button class="btn larga fina" id="dExportarJson" style="margin-top:8px">Guardar backup (JSON)</button>' +
+    '<button class="btn larga fina" id="dExportarCsv" style="margin-top:8px">Guardar em CSV</button>' +
+    estadoDoBackup() + '</div>';
+}
+
+/* --- Peso corporal ---
+   Os 118 registos que vieram do FitNotes estavam guardados e sem forma
+   nenhuma de os ver. Aqui veem-se e acrescentam-se. */
+function cartaoPesoCorporal() {
+  var pesagens = Estado.pesagens.slice()
+    .sort(function (a, b) { return a.data < b.data ? -1 : 1; });
+  var ultima = pesagens[pesagens.length - 1];
+
+  var html = '<div class="cartao"><h3>Peso corporal</h3>' +
+    '<div class="linha" style="gap:8px;align-items:flex-end">' +
+      '<label class="campo crescer" style="margin:0"><span>Hoje (kg)</span>' +
+        '<input id="pcValor" type="number" inputmode="decimal" step="any" placeholder="' +
+        (ultima ? num(ultima.kg) : '75,0') + '"></label>' +
+      '<button class="btn primaria" id="pcGuardar" style="flex:none">Registar</button>' +
+    '</div>';
+
+  if (!pesagens.length) {
+    html += '<p class="mini fraco" style="margin:12px 0 0">Ainda não há pesagens.</p>';
+    return html + '</div>';
+  }
+
+  var primeira = pesagens[0];
+  var diferenca = ultima.kg - primeira.kg;
+
+  html += '<div class="linha entre" style="margin-top:14px">' +
+    '<div class="centro crescer"><div style="font-size:20px;font-weight:700" class="nums">' +
+      num(ultima.kg, 1) + '</div><div class="mini fraco">' + esc(dataCurta(ultima.data)) + '</div></div>' +
+    '<div class="centro crescer"><div style="font-size:20px;font-weight:700" class="nums">' +
+      (diferenca >= 0 ? '+' : '') + num(diferenca, 1) + '</div><div class="mini fraco">desde ' +
+      esc(dataCurta(primeira.data)) + '</div></div>' +
+    '<div class="centro crescer"><div style="font-size:20px;font-weight:700" class="nums">' +
+      pesagens.length + '</div><div class="mini fraco">pesagens</div></div>' +
+    '</div>';
+
+  if (pesagens.length > 1) {
+    html += '<div style="margin-top:12px">' + grafLinhas([{
+      nome: 'Peso', cor: '#22c55e',
+      pontos: pesagens.map(function (p) { return { x: p.data, y: p.kg }; })
+    }], { altura: 170, desdeZero: false, titulo: 'Peso corporal' }) + '</div>';
+  }
+
+  // As ultimas, para se poder corrigir uma que tenha ficado mal.
+  html += '<div class="lista" style="margin:12px 0 0"><div class="cab">Últimas</div>' +
+    pesagens.slice(-6).reverse().map(function (p) {
+      return '<button class="item" data-pesagem="' + p.id + '">' +
+        '<span class="crescer">' + esc(dataLonga(p.data)) + '</span>' +
+        '<span class="nums" style="font-weight:600">' + num(p.kg, 1) + ' kg</span>' +
+        '<span class="seta">&#8250;</span></button>';
+    }).join('') + '</div>';
+
+  return html + '</div>';
+}
+
+/* --- Descanso por defeito, para exercicios que nao tenham o seu --- */
+function cartaoDescanso() {
+  return '<div class="cartao"><h3>Descanso por defeito</h3>' +
+    '<div class="linha" style="gap:8px;align-items:flex-end">' +
+      '<label class="campo crescer" style="margin:0"><span>Segundos</span>' +
+        '<input id="dsValor" type="number" inputmode="numeric" value="' +
+        (Estado.definicoes.descansoPadraoSeg || 120) + '"></label>' +
+      '<button class="btn primaria" id="dsGuardar" style="flex:none">Guardar</button>' +
+    '</div>' +
+    '<p class="mini fraco" style="margin:12px 0 0">Usado nos exercícios que não têm ' +
+    'descanso próprio. Cada exercício pode ter o seu, e fica guardado sozinho quando ' +
+    'mudas o valor no ecrã de registo.</p></div>';
+}
+
+/* --- Versao --- */
+function cartaoVersao() {
+  return '<div class="cartao"><h3>Versão</h3>' +
+    '<button class="btn larga fina" id="dProcurarVersao">Procurar atualização</button>' +
+    '<p class="mini fraco" style="margin:10px 0 0">A app procura sozinha sempre que abre, ' +
+    'e avisa quando encontra. Este botão serve para forçar, sem ter de fechar e abrir.</p>' +
+    '</div>';
+}
+
+/* --- Onde e como os dados estao guardados --- */
+function cartaoArmazenamento() {
+  var linhas = [];
+
+  linhas.push('<div class="linha entre pequeno" style="padding:4px 0">' +
+    '<span class="suave">A correr</span><span>' +
+    (Armazenamento.noEcraPrincipal ? 'no ícone do ecrã principal' : 'num separador do browser') +
+    '</span></div>');
+
+  linhas.push('<div class="linha entre pequeno" style="padding:4px 0">' +
+    '<span class="suave">Armazenamento</span><span>' +
+    (Armazenamento.persistente === true ? 'permanente'
+      : Armazenamento.persistente === false ? 'não garantido' : 'o browser não diz') +
+    '</span></div>');
+
+  linhas.push('<div class="linha entre pequeno" style="padding:4px 0">' +
+    '<span class="suave">Guardado</span><span class="nums">' +
+    plural(Estado.series.length, 'série', 'séries') + '</span></div>');
+
+  return '<div class="cartao"><h3>Onde estão os dados</h3>' + linhas.join('') +
+    '<p class="mini fraco" style="margin:12px 0 0">Tudo neste telemóvel, na base de dados ' +
+    'do browser. Não há servidor nenhum e nada sai daqui — nem para mim, nem para ninguém. ' +
+    'É por isso que os backups importam.</p></div>';
+}
+
+/* --- Apagar tudo --- */
+function cartaoPerigo() {
+  return '<div class="cartao" style="border-color:rgba(239,68,68,.35)">' +
+    '<h3 style="color:var(--vermelho)">Apagar tudo</h3>' +
+    '<button class="btn perigo larga fina" id="dApagarTudo">Apagar todos os dados</button>' +
+    '<p class="mini fraco" style="margin:10px 0 0">Apaga treinos, exercícios e pesagens. ' +
+    'Não se desfaz. Guarda um backup antes.</p></div>';
+}
+
+function ligarDefinicoes() {
+  $('#dImportarCsv').onclick = function () { pedirFicheiro('.csv,text/csv', importarCsvFicheiro); };
+  $('#dImportarBackup').onclick = function () { pedirFicheiro('.json,application/json', importarBackupFicheiro); };
+  $('#dExportarJson').onclick = exportarJson;
+  $('#dExportarCsv').onclick = exportarCsv;
+  $('#dProcurarVersao').onclick = procurarAtualizacao;
+
+  $('#pcGuardar').onclick = function () {
+    var v = parseFloat($('#pcValor').value);
+    if (!Number.isFinite(v) || v <= 0) { avisar('Falta o peso'); return; }
+    registarPeso(hojeIso(), Math.round(v * 10) / 10);
+  };
+
+  $('#dsGuardar').onclick = function () {
+    var v = parseInt($('#dsValor').value, 10);
+    if (!Number.isFinite(v) || v <= 0) { avisar('Valor inválido'); return; }
+    guardarDefinicao('descansoPadraoSeg', v).then(function () { avisar('Guardado'); });
+  };
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-pesagem]'), function (b) {
+    b.onclick = function () { editarPesagem(+b.dataset.pesagem); };
+  });
+
+  $('#dApagarTudo').onclick = function () {
+    confirmar('Apagar todos os dados',
+      'Vai apagar ' + plural(Estado.series.length, 'série', 'séries') + ', ' +
+      plural(Estado.exercicios.length, 'exercício', 'exercícios') + ' e ' +
+      plural(Estado.pesagens.length, 'pesagem', 'pesagens') + '. Isto não se desfaz.',
+      'Apagar tudo', function () {
+        BD.limpar(['exercicios', 'sessoes', 'series', 'pesagens'])
+          .then(function () { return carregarTudo(); })
+          .then(function () { return semearExercicios(); })
+          .then(function () {
+            Estado.exercicioAtivo = null;
+            Estado.exercicioAnalise = null;
+            avisar('Apagado');
+            render();
+          });
+      });
+  };
+}
+
+/* Uma pesagem por dia: registar outra vez no mesmo dia substitui. */
+function registarPeso(data, kg) {
+  var ja = Estado.pesagens.find(function (p) { return p.data === data; });
+  var registo = ja || { id: proximoId(Estado.pesagens), data: data, kg: kg };
+  registo.kg = kg;
+  if (!ja) Estado.pesagens.push(registo);
+  BD.guardar('pesagens', registo).then(function () {
+    avisar(ja ? 'Peso de hoje atualizado' : 'Peso registado');
+    render();
+  });
+}
+
+function editarPesagem(id) {
+  var p = Estado.pesagens.find(function (x) { return x.id === id; });
+  if (!p) return;
+  abrirFolha(dataLonga(p.data),
+    '<label class="campo"><span>Peso (kg)</span>' +
+      '<input id="epValor" type="number" inputmode="decimal" step="any" value="' + p.kg + '"></label>' +
+    '<button class="btn primaria larga" id="epGuardar">Guardar</button>' +
+    '<button class="btn perigo larga" id="epApagar" style="margin-top:8px">Apagar pesagem</button>',
+    function (corpo) {
+      corpo.querySelector('#epGuardar').onclick = function () {
+        var v = parseFloat(corpo.querySelector('#epValor').value);
+        if (!Number.isFinite(v) || v <= 0) { avisar('Valor inválido'); return; }
+        p.kg = Math.round(v * 10) / 10;
+        BD.guardar('pesagens', p).then(function () { fecharFolha(); avisar('Guardado'); render(); });
+      };
+      corpo.querySelector('#epApagar').onclick = function () {
+        Estado.pesagens = Estado.pesagens.filter(function (x) { return x.id !== id; });
+        BD.apagar('pesagens', id).then(function () { fecharFolha(); avisar('Apagada'); render(); });
+      };
     });
 }
 
@@ -3998,6 +4254,7 @@ function render() {
   if (Estado.vista === 'treino') renderTreino();
   else if (Estado.vista === 'historico') renderHistorico();
   else if (Estado.vista === 'analises') renderAnalises();
+  else if (Estado.vista === 'definicoes') renderDefinicoes();
   else renderExercicios();
 }
 
