@@ -3837,16 +3837,16 @@ function analiseRecordes(corpo) {
 
 
 /* --------------------------------------------------------------------------
-   Analises: objetivos de levantamento
+   Analises: objetivos dos levantamentos
 
    Um objetivo e "chegar a X kg com N repeticoes ate uma data". A marca que
    conta e a mesma da curva: o melhor peso feito com N repeticoes OU MAIS —
    quem faz 8 com um peso fez 5 com esse peso pelo caminho.
+
+   So estes levantamentos e que levam objetivo, de proposito. Sao os que o
+   Bruno quis seguir, e ter objetivos em tudo era tirar-lhes o significado.
    ----------------------------------------------------------------------- */
 
-/* Os levantamentos que o Bruno quis seguir, pelos nomes que tem na
-   biblioteca. Servem so para o botao de criar depressa; qualquer exercicio
-   pode ter objetivo. */
 var LEVANTAMENTOS_PRINCIPAIS = [
   'Barbell Squat',
   'Flat Barbell Bench Press',
@@ -3856,9 +3856,23 @@ var LEVANTAMENTOS_PRINCIPAIS = [
   'Barbell Shoulder Press'
 ];
 
+/* Os que existem mesmo na biblioteca, pela ordem da lista acima. */
+function levantamentosComObjetivo() {
+  var achados = [];
+  LEVANTAMENTOS_PRINCIPAIS.forEach(function (nome) {
+    var e = Estado.exercicios.filter(function (x) { return x.nome === nome && !x.arquivado; })[0];
+    if (e) achados.push(e);
+  });
+  return achados;
+}
+
 function objetivosGuardados() {
   var lista = Estado.definicoes.objetivos;
   return Array.isArray(lista) ? lista : [];
+}
+
+function objetivoDe(exercicioId) {
+  return objetivosGuardados().filter(function (o) { return o.exercicioId === exercicioId; })[0] || null;
 }
 
 function guardarObjetivos(lista) {
@@ -3870,113 +3884,129 @@ function valorDoObjetivo(o) {
   return melhorPesoParaReps(curvaDe(o.exercicioId), o.reps);
 }
 
-function analiseObjetivos(corpo) {
-  var lista = objetivosGuardados();
+/* O fim do ano corrente, que e o prazo por defeito. */
+function fimDoAno() {
+  var ano = +hojeIso().slice(0, 4);
+  var fim = ano + '-12-31';
+  return fim > hojeIso() ? fim : (ano + 1) + '-12-31';
+}
 
-  if (!lista.length) {
-    corpo.innerHTML =
-      '<p class="vazio">Ainda não tens objetivos.<br>' +
-      'Escolhe um levantamento e diz onde queres chegar.</p>' +
-      '<button class="btn primaria larga" id="obNovo">Novo objetivo</button>';
-    $('#obNovo').onclick = function () { editarObjetivo(null); };
+function analiseObjetivos(corpo) {
+  var levantamentos = levantamentosComObjetivo();
+
+  if (!levantamentos.length) {
+    corpo.innerHTML = '<p class="vazio">Nenhum dos levantamentos principais está na tua ' +
+      'biblioteca.<br>Os objetivos são para: ' + esc(LEVANTAMENTOS_PRINCIPAIS.join(', ')) + '.</p>';
     return;
   }
 
-  var html = lista.map(function (o, i) {
-    var e = exercicioPorId(o.exercicioId);
-    var p = progressoDeObjetivo(valorDoObjetivo(o), o, hojeIso());
-    if (!e || !p) return '';
+  var comObjetivo = objetivosGuardados().length;
+  var html = '<div class="cartao" style="margin-top:0"><h3>Objetivos para ' +
+    esc(fimDoAno().slice(0, 4)) + '</h3>' +
+    '<p class="mini fraco" style="margin:0">' +
+    (comObjetivo
+      ? plural(comObjetivo, 'levantamento com objetivo', 'levantamentos com objetivo') +
+        ' de ' + levantamentos.length + '.'
+      : 'Define onde queres chegar em cada um. Toca para escolher o peso, as ' +
+        'repetições e o prazo.') + '</p></div>';
 
-    var cor = p.atingido ? 'var(--verde)' : p.adiantado ? 'var(--verde)' : 'var(--ambar)';
-    var historico = pesoPorDiaParaReps(Estado.series, o.exercicioId, o.reps)
-      .filter(function (x) { return x.data >= o.desde; })
-      .map(function (x) { return { x: x.data, y: x.peso }; });
-
-    return '<div class="cartao">' +
-      '<div class="linha entre" style="margin-bottom:10px">' +
-        '<h3 style="margin:0;text-transform:none;font-size:16px;color:var(--texto)">' +
-          esc(e.nome) + '</h3>' +
-        '<button class="acao" data-editar-obj="' + i + '" style="color:var(--azul)">Editar</button>' +
-      '</div>' +
-      '<p class="pequeno suave" style="margin:0 0 10px">' + kg(o.alvo) + ' × ' +
-        plural(o.reps, 'rep', 'reps') + ' até ' + esc(dataLonga(o.ate)) + '</p>' +
-
-      '<div style="height:9px;background:var(--sup3);border-radius:99px;overflow:hidden">' +
-        '<div style="height:100%;width:' + p.percentagem.toFixed(1) +
-        '%;background:' + cor + ';border-radius:99px"></div></div>' +
-      '<div class="linha entre mini" style="margin-top:6px">' +
-        '<span class="fraco">' + num(p.inicial) + ' kg</span>' +
-        '<span style="color:' + cor + ';font-weight:700">' + num(p.percentagem, 0) + '%</span>' +
-        '<span class="fraco">' + num(p.alvo) + ' kg</span>' +
-      '</div>' +
-
-      '<div class="linha entre" style="margin-top:14px">' +
-        '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
-          num(p.atual) + '</div><div class="mini fraco">agora</div></div>' +
-        '<div class="centro crescer"><div style="font-size:19px;font-weight:700;color:' + cor +
-          '" class="nums">' + (p.atingido ? '✓' : num(Math.abs(p.falta))) + '</div>' +
-          '<div class="mini fraco">' + (p.atingido ? 'atingido' : 'kg a subir') + '</div></div>' +
-        '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
-          (p.diasRestantes > 0 ? p.diasRestantes : 0) +
-          '</div><div class="mini fraco">dias</div></div>' +
-      '</div>' +
-
-      (p.atingido ? ''
-        : '<p class="pequeno" style="margin:12px 0 0;color:' + cor + '">' +
-          (p.adiantado ? 'A cumprir.' : 'Atrasado.') + ' Para hoje, o esperado era ' +
-          num(p.esperadoHoje) + ' kg.</p>' +
-          (p.ritmoSemanal !== null
-            ? '<p class="mini fraco" style="margin:6px 0 0">Daqui para a frente dá ' +
-              num(Math.abs(p.ritmoSemanal), 2) + ' kg por semana.</p>'
-            : '<p class="mini fraco" style="margin:6px 0 0">A data já passou.</p>')) +
-
-      (historico.length > 1
-        ? '<div style="margin-top:12px">' + grafLinhas([
-            { nome: 'Feito', cor: '#3b82f6', pontos: historico },
-            { nome: 'Objetivo', cor: '#f59e0b', pontos: p.linha }
-          ], { altura: 170, desdeZero: false, legenda: true,
-               titulo: e.nome + ' a ' + o.reps + ' reps' }) + '</div>'
-        : '<p class="mini fraco" style="margin:12px 0 0">Ainda não há séries a ' +
-          plural(o.reps, 'rep', 'reps') + ' desde que definiste o objetivo.</p>') +
-      '</div>';
+  html += levantamentos.map(function (e) {
+    var o = objetivoDe(e.id);
+    if (!o) return cartaoSemObjetivo(e);
+    return cartaoComObjetivo(e, o);
   }).join('');
 
-  html += '<button class="btn larga" id="obNovo">+ Novo objetivo</button>';
   corpo.innerHTML = html;
 
-  $('#obNovo').onclick = function () { editarObjetivo(null); };
-  Array.prototype.forEach.call(document.querySelectorAll('[data-editar-obj]'), function (b) {
-    b.onclick = function () { editarObjetivo(+b.dataset.editarObj); };
+  Array.prototype.forEach.call(document.querySelectorAll('[data-obj-ex]'), function (b) {
+    b.onclick = function () { editarObjetivo(+b.dataset.objEx); };
   });
 }
 
-/* Criar ou mudar um objetivo. indice null = novo. */
-function editarObjetivo(indice) {
-  var lista = objetivosGuardados();
-  var o = indice === null ? null : lista[indice];
+/* Um levantamento ainda sem objetivo: mostra onde esta e convida a definir. */
+function cartaoSemObjetivo(e) {
+  var curva = curvaDe(e.id);
+  var marca5 = melhorPesoParaReps(curva, 5);
+  var m = melhores()[e.id];
 
-  // Os levantamentos principais primeiro, depois os mais usados.
-  var contas = {};
-  Estado.series.forEach(function (s) { contas[s.exercicioId] = (contas[s.exercicioId] || 0) + 1; });
-  var principais = [], resto = [];
-  Estado.exercicios.filter(function (e) { return !e.arquivado && contas[e.id]; })
-    .sort(function (a, b) { return (contas[b.id] || 0) - (contas[a.id] || 0); })
-    .forEach(function (e) {
-      (LEVANTAMENTOS_PRINCIPAIS.indexOf(e.nome) !== -1 ? principais : resto).push(e);
-    });
-  var ordenados = principais.concat(resto);
+  return '<div class="cartao"><div class="linha entre" style="margin-bottom:8px">' +
+      '<h3 style="margin:0;text-transform:none;font-size:16px;color:var(--texto)">' +
+        esc(e.nome) + '</h3>' +
+      '<span class="etiqueta">sem objetivo</span>' +
+    '</div>' +
+    '<p class="mini fraco" style="margin:0 0 12px">' +
+      (marca5 !== null ? 'Agora: ' + kg(marca5) + ' a 5 reps' : 'Ainda sem marca a 5 reps') +
+      (m && Number.isFinite(m.melhor1RM) ? ' · 1RM ~' + kg(m.melhor1RM) : '') + '</p>' +
+    '<button class="btn primaria larga fina" data-obj-ex="' + e.id + '">Definir objetivo</button>' +
+    '</div>';
+}
 
-  var exercicioEscolhido = o ? o.exercicioId : (ordenados[0] ? ordenados[0].id : null);
-  if (!exercicioEscolhido) { avisar('Ainda não há exercícios com séries'); return; }
+/* Um levantamento com objetivo: o progresso e o grafico. */
+function cartaoComObjetivo(e, o) {
+  var p = progressoDeObjetivo(valorDoObjetivo(o), o, hojeIso());
+  if (!p) return cartaoSemObjetivo(e);
 
-  var daquiATresMeses = recuarDias(hojeIso(), -91);
+  var cor = p.atingido ? 'var(--verde)' : p.adiantado ? 'var(--verde)' : 'var(--ambar)';
+  var historico = pesoPorDiaParaReps(Estado.series, o.exercicioId, o.reps)
+    .filter(function (x) { return x.data >= o.desde; })
+    .map(function (x) { return { x: x.data, y: x.peso }; });
 
-  abrirFolha(o ? 'Mudar o objetivo' : 'Novo objetivo',
-    '<label class="campo"><span>Levantamento</span><select id="obEx">' +
-      ordenados.map(function (e) {
-        return '<option value="' + e.id + '"' +
-          (e.id === exercicioEscolhido ? ' selected' : '') + '>' + esc(e.nome) + '</option>';
-      }).join('') + '</select></label>' +
+  return '<div class="cartao">' +
+    '<div class="linha entre" style="margin-bottom:8px">' +
+      '<h3 style="margin:0;text-transform:none;font-size:16px;color:var(--texto)">' +
+        esc(e.nome) + '</h3>' +
+      '<button class="acao" data-obj-ex="' + e.id + '" style="color:var(--azul)">Mudar</button>' +
+    '</div>' +
+    '<p class="pequeno suave" style="margin:0 0 10px">' + kg(o.alvo) + ' × ' +
+      plural(o.reps, 'rep', 'reps') + ' até ' + esc(dataLonga(o.ate)) + '</p>' +
+
+    '<div style="height:9px;background:var(--sup3);border-radius:99px;overflow:hidden">' +
+      '<div style="height:100%;width:' + p.percentagem.toFixed(1) +
+      '%;background:' + cor + ';border-radius:99px"></div></div>' +
+    '<div class="linha entre mini" style="margin-top:6px">' +
+      '<span class="fraco">' + num(p.inicial) + ' kg</span>' +
+      '<span style="color:' + cor + ';font-weight:700">' + num(p.percentagem, 0) + '%</span>' +
+      '<span class="fraco">' + num(p.alvo) + ' kg</span>' +
+    '</div>' +
+
+    '<div class="linha entre" style="margin-top:14px">' +
+      '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
+        num(p.atual) + '</div><div class="mini fraco">agora</div></div>' +
+      '<div class="centro crescer"><div style="font-size:19px;font-weight:700;color:' + cor +
+        '" class="nums">' + (p.atingido ? '✓' : num(Math.abs(p.falta))) + '</div>' +
+        '<div class="mini fraco">' + (p.atingido ? 'atingido' : 'kg a subir') + '</div></div>' +
+      '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
+        (p.diasRestantes > 0 ? p.diasRestantes : 0) +
+        '</div><div class="mini fraco">dias</div></div>' +
+    '</div>' +
+
+    (p.atingido ? ''
+      : '<p class="pequeno" style="margin:12px 0 0;color:' + cor + '">' +
+        (p.adiantado ? 'A cumprir.' : 'Atrasado.') + ' Para hoje, o esperado era ' +
+        num(p.esperadoHoje) + ' kg.</p>' +
+        (p.ritmoSemanal !== null
+          ? '<p class="mini fraco" style="margin:6px 0 0">Daqui para a frente dá ' +
+            num(Math.abs(p.ritmoSemanal), 2) + ' kg por semana.</p>'
+          : '<p class="mini fraco" style="margin:6px 0 0">A data já passou.</p>')) +
+
+    (historico.length > 1
+      ? '<div style="margin-top:12px">' + grafLinhas([
+          { nome: 'Feito', cor: '#3b82f6', pontos: historico },
+          { nome: 'Objetivo', cor: '#f59e0b', pontos: p.linha }
+        ], { altura: 170, desdeZero: false, legenda: true,
+             titulo: e.nome + ' a ' + o.reps + ' reps' }) + '</div>'
+      : '<p class="mini fraco" style="margin:12px 0 0">Ainda não há séries a ' +
+        plural(o.reps, 'rep', 'reps') + ' desde que definiste o objetivo.</p>') +
+    '</div>';
+}
+
+/* Definir ou mudar o objetivo de um levantamento. */
+function editarObjetivo(exercicioId) {
+  var e = exercicioPorId(exercicioId);
+  if (!e) return;
+  var o = objetivoDe(exercicioId);
+
+  abrirFolha(e.nome,
     '<div class="linha" style="gap:10px">' +
       '<label class="campo crescer"><span>Chegar a (kg)</span>' +
         '<input id="obKg" type="number" inputmode="decimal" step="any" value="' +
@@ -3986,35 +4016,31 @@ function editarObjetivo(indice) {
         (o ? o.reps : 5) + '"></label>' +
     '</div>' +
     '<label class="campo"><span>Até</span>' +
-      '<input id="obAte" type="date" value="' + (o ? o.ate : daquiATresMeses) +
+      '<input id="obAte" type="date" value="' + (o ? o.ate : fimDoAno()) +
       '" min="' + hojeIso() + '"></label>' +
     '<p class="mini fraco" id="obAgora"></p>' +
     '<button class="btn primaria larga" id="obGuardar">Guardar objetivo</button>' +
     (o ? '<button class="btn perigo larga" id="obApagar" style="margin-top:8px">' +
       'Apagar objetivo</button>' : ''),
     function (corpo) {
-      var selEx = corpo.querySelector('#obEx');
       var campoReps = corpo.querySelector('#obReps');
       var nota = corpo.querySelector('#obAgora');
 
       /* Mostra a marca de agora, que e o ponto de partida do objetivo. */
       function mostrarAgora() {
-        var id = +selEx.value;
         var reps = parseInt(campoReps.value, 10);
-        var marca = melhorPesoParaReps(curvaDe(id), reps);
+        var marca = melhorPesoParaReps(curvaDe(exercicioId), reps);
         nota.textContent = !Number.isFinite(reps) || reps < 1
           ? 'Põe o número de repetições.'
           : marca === null
-            ? 'Ainda nunca fizeste ' + reps + ' repetições neste exercício. O objetivo começa do zero.'
+            ? 'Ainda nunca fizeste ' + reps + ' repetições neste exercício. A contagem começa do zero.'
             : 'Agora estás em ' + num(marca) + ' kg a ' + plural(reps, 'rep', 'reps') +
               '. É daí que a contagem começa.';
       }
-      selEx.onchange = mostrarAgora;
       campoReps.oninput = mostrarAgora;
       mostrarAgora();
 
       corpo.querySelector('#obGuardar').onclick = function () {
-        var id = +selEx.value;
         var alvo = parseFloat(corpo.querySelector('#obKg').value);
         var reps = parseInt(campoReps.value, 10);
         var ate = corpo.querySelector('#obAte').value;
@@ -4024,29 +4050,28 @@ function editarObjetivo(indice) {
         if (!ate) { avisar('Falta a data'); return; }
         if (ate <= hojeIso()) { avisar('A data tem de ser no futuro'); return; }
 
-        var marca = melhorPesoParaReps(curvaDe(id), reps);
+        var marca = melhorPesoParaReps(curvaDe(exercicioId), reps);
         var inicial = Number.isFinite(marca) ? marca : 0;
         if (alvo <= inicial) {
           avisar('Já estás em ' + num(inicial) + ' kg. Põe um objetivo mais alto.');
           return;
         }
 
+        // Mudar as repeticoes ou o prazo recomeca a contagem, senao a linha
+        // vinha de um ponto de partida que ja nao e o que se decidiu agora.
+        var igual = o && o.reps === reps && o.ate === ate;
         var novo = {
-          exercicioId: id,
+          exercicioId: exercicioId,
           alvo: Math.round(alvo * 100) / 100,
           reps: reps,
           ate: ate,
-          // Mudar o objetivo recomeça a contagem, senão a linha vinha de um
-          // ponto de partida que já não é o que se decidiu agora.
-          desde: (o && o.exercicioId === id && o.reps === reps && o.ate === ate)
-            ? o.desde : hojeIso(),
-          inicial: (o && o.exercicioId === id && o.reps === reps && o.ate === ate)
-            ? o.inicial : inicial
+          desde: igual ? o.desde : hojeIso(),
+          inicial: igual ? o.inicial : inicial
         };
 
-        var nova = lista.slice();
-        if (indice === null) nova.push(novo); else nova[indice] = novo;
-        guardarObjetivos(nova).then(function () {
+        var lista = objetivosGuardados().filter(function (x) { return x.exercicioId !== exercicioId; });
+        lista.push(novo);
+        guardarObjetivos(lista).then(function () {
           fecharFolha(); avisar('Objetivo guardado'); render();
         });
       };
@@ -4054,24 +4079,14 @@ function editarObjetivo(indice) {
       var apagar = corpo.querySelector('#obApagar');
       if (apagar) {
         apagar.onclick = function () {
-          var nova = lista.slice();
-          nova.splice(indice, 1);
-          guardarObjetivos(nova).then(function () {
+          var lista = objetivosGuardados().filter(function (x) { return x.exercicioId !== exercicioId; });
+          guardarObjetivos(lista).then(function () {
             fecharFolha(); avisar('Objetivo apagado'); render();
           });
         };
       }
     });
 }
-
-/* --------------------------------------------------------------------------
-   Analises: peso corporal e o objetivo
-
-   O grafico mostra duas linhas: o peso real e a linha do que era preciso para
-   chegar ao objetivo a tempo. Ver as duas juntas diz mais do que qualquer
-   numero — se a linha do peso esta por baixo da do objetivo, esta a correr
-   bem; se esta por cima, nao.
-   ----------------------------------------------------------------------- */
 
 function renderPeso() {
   $('#titulo').textContent = 'Peso corporal';
