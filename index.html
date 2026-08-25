@@ -188,6 +188,8 @@ a{color:var(--azul)}
   display:flex;align-items:center;justify-content:center}
 .mini-b:active{background:var(--azul);color:#fff}
 .mini-b.tirar:active{background:var(--vermelho);color:#fff}
+.mini-b.mover{width:30px;font-size:11px}
+.mini-b[disabled]{opacity:.25;pointer-events:none}
 
 /* ---------------------------------------------------------------------------
    4. Registo de serie: os tres campos grandes e os passos +/-
@@ -993,6 +995,51 @@ function importarFitNotes(texto, opcoes) {
     });
   }
   return res;
+}
+
+/* --------------------------------------------------------------------------
+   Trocar a ordem dos exercicios dentro de um dia
+
+   A ordem e guardada em duas coisas: 'ordemExercicio' e a posicao do exercicio
+   no treino e 'ordem' e a posicao da serie no treino todo. Trocar dois
+   exercicios obriga a reescrever as duas, senao a lista fica com a ordem certa
+   nos blocos e trocada dentro deles.
+
+   Nao grava nada: devolve so as series que mudaram, e quem chama e que decide.
+   ----------------------------------------------------------------------- */
+
+function reordenarExercicios(series, exercicioId, direcao) {
+  var ordenadas = series.slice().sort(function (a, b) {
+    return ((a.ordemExercicio || 0) - (b.ordemExercicio || 0)) ||
+           ((a.ordem || 0) - (b.ordem || 0));
+  });
+
+  var ids = [];
+  ordenadas.forEach(function (s) {
+    if (ids.indexOf(s.exercicioId) === -1) ids.push(s.exercicioId);
+  });
+
+  var i = ids.indexOf(exercicioId);
+  var j = i + direcao;
+  // ja esta na ponta, ou o exercicio nem esta neste dia: nao ha nada a fazer
+  if (i < 0 || j < 0 || j >= ids.length) return [];
+
+  ids[i] = ids[j];
+  ids[j] = exercicioId;
+
+  var alteradas = [], n = 0;
+  ids.forEach(function (eid, pos) {
+    ordenadas.forEach(function (s) {
+      if (s.exercicioId !== eid) return;
+      if ((s.ordemExercicio || 0) !== pos || (s.ordem || 0) !== n) {
+        alteradas.push(s);
+      }
+      s.ordemExercicio = pos;
+      s.ordem = n;
+      n++;
+    });
+  });
+  return alteradas;
 }
 
 /* --------------------------------------------------------------------------
@@ -2257,7 +2304,7 @@ function renderDia() {
     });
 
     var prs = recordes();
-    porEx.forEach(function (bloco) {
+    porEx.forEach(function (bloco, indice) {
       var e = ex(bloco.id);
       var nome = e ? e.nome : 'Exercício apagado';
       html += '<div class="lista">' +
@@ -2271,6 +2318,12 @@ function renderDia() {
           '</button>' +
           '<button class="abrir" data-abrir-ex="' + bloco.id + '" ' +
             'aria-label="abrir o exercício">&#8250;</button>' +
+          '<button class="mini-b mover" data-mover-ex="' + bloco.id + '" ' +
+            'data-dir="-1"' + (indice === 0 ? ' disabled' : '') +
+            ' aria-label="subir o exercício">&#9650;</button>' +
+          '<button class="mini-b mover" data-mover-ex="' + bloco.id + '" ' +
+            'data-dir="1"' + (indice === porEx.length - 1 ? ' disabled' : '') +
+            ' aria-label="descer o exercício">&#9660;</button>' +
           '<button class="mini-b tirar" data-tirar-serie="' + bloco.id + '" ' +
             'aria-label="tirar uma série">&minus;</button>' +
           '<button class="mini-b" data-por-serie="' + bloco.id + '" ' +
@@ -2318,6 +2371,9 @@ function renderDia() {
   });
   Array.prototype.forEach.call(document.querySelectorAll('[data-tirar-serie]'), function (b) {
     b.onclick = function () { tirarUltimaSerie(+b.dataset.tirarSerie); };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-mover-ex]'), function (b) {
+    b.onclick = function () { moverExercicio(+b.dataset.moverEx, +b.dataset.dir); };
   });
   ligarLinhasDeSerie();
   ligarLinhasEditaveis();
@@ -2600,6 +2656,22 @@ function acrescentarSerie(exercicioId) {
 /* Tira a ultima serie daquele exercicio no dia. So pergunta se a serie ja
    estava dada como feita: tirar uma serie planeada e um gesto sem custo,
    tirar uma feita e perder um registo. */
+/* Sobe ou desce um exercicio no treino do dia. A posicao da lista e guardada:
+   mover o quarto exercicio e ver o ecra saltar para o topo era irritante. */
+function moverExercicio(exercicioId, direcao) {
+  var alteradas = reordenarExercicios(seriesDoDia(Estado.dataAtual),
+                                      exercicioId, direcao);
+  if (!alteradas.length) return;
+  vibrar(10);
+  var posicao = $('#conteudo').scrollTop;
+  BD.guardarMuitos('series', alteradas).then(function () {
+    // a ordem entra na deteccao de recordes -- os indices tem de ser refeitos
+    reindexar();
+    render();
+    $('#conteudo').scrollTop = posicao;
+  });
+}
+
 function tirarUltimaSerie(exercicioId) {
   var deste = seriesDoDia(Estado.dataAtual)
     .filter(function (s) { return s.exercicioId === exercicioId; });
