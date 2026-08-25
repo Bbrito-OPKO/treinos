@@ -174,34 +174,44 @@ a{color:var(--azul)}
 .serie .v{font-size:17px;font-weight:600;font-variant-numeric:tabular-nums}
 .serie.recorde .n{background:rgba(245,158,11,.2);color:var(--ambar)}
 
-/* Serie editavel: peso, reps, o visto de feito, o RIR e a marca a bater.
-   Em grelha e nao em flex para as colunas ficarem alinhadas de linha
-   para linha, que e o que faz a lista poder ser lida de relance. */
+/* Serie editavel: peso, reps, o visto de feito e o RIR, cada um com um menos
+   e um mais de cada lado. Em grelha e nao em flex para as colunas ficarem
+   alinhadas de linha para linha — e o que faz a lista poder ser lida de
+   relance. A marca a bater vai para uma linha propria por baixo: assim os
+   botoes tem espaco e o numero fica explicado em vez de solto. */
 .linhas-cab,.serie-ed{display:grid;
-  grid-template-columns:20px minmax(52px,1fr) 10px minmax(40px,.7fr) 38px 42px minmax(44px,auto);
-  gap:5px;align-items:center}
-.linhas-cab{padding:6px 12px 4px;font-size:10.5px;font-weight:700;color:var(--fraco);
-  text-transform:uppercase;letter-spacing:.04em}
+  grid-template-columns:13px 25px minmax(46px,1fr) 25px 25px 38px 25px 38px 23px 30px 23px;
+  gap:3px;align-items:center}
+.linhas-cab{padding:7px 10px 3px;font-size:10px;font-weight:700;color:var(--fraco);
+  text-transform:uppercase;letter-spacing:.03em}
 .linhas-cab span{text-align:center}
-.linhas-cab span:first-child{text-align:left}
-.serie-ed{padding:7px 12px;border-bottom:1px solid var(--borda)}
+.serie-ed{padding:6px 10px 8px;border-bottom:1px solid var(--borda)}
 .serie-ed:last-child{border-bottom:0}
-.serie-ed .n{font-size:12.5px;font-weight:700;color:var(--fraco);text-align:center}
-.serie-ed .x{text-align:center;color:var(--fraco);font-size:13px}
+.serie-ed .n{font-size:12px;font-weight:700;color:var(--fraco);text-align:center}
 .serie-ed input{width:100%;background:var(--sup2);border:1px solid var(--borda);
-  border-radius:8px;padding:8px 4px;min-height:42px;text-align:center;outline:none;
+  border-radius:8px;padding:8px 2px;min-height:42px;text-align:center;outline:none;
   font-size:16px;font-weight:600;font-variant-numeric:tabular-nums;-moz-appearance:textfield}
 .serie-ed input::-webkit-outer-spin-button,.serie-ed input::-webkit-inner-spin-button{
   -webkit-appearance:none;margin:0}
 .serie-ed input:focus{border-color:var(--azul)}
-.serie-ed input.rir{font-size:15px;color:var(--suave)}
+.serie-ed input.rir{color:var(--suave)}
+.serie-ed input.rir::placeholder{color:var(--fraco);font-weight:400}
+
+/* Os menos e os mais. Estreitos mas com a altura toda da linha, para o dedo
+   ter onde cair mesmo com pouca largura. */
+.serie-ed .passo-b{min-height:42px;border-radius:7px;background:var(--sup3);
+  color:var(--suave);font-size:17px;font-weight:600;line-height:1;
+  display:flex;align-items:center;justify-content:center;padding:0}
+.serie-ed .passo-b:active{background:var(--azul);color:#fff}
+
 .serie-ed .feito{min-height:42px;border-radius:8px;border:1.5px solid var(--borda);
   background:var(--sup2);color:var(--fraco);font-size:17px;font-weight:700;
   display:flex;align-items:center;justify-content:center}
 .serie-ed .feito.on{background:var(--verde);border-color:var(--verde);color:#04240f}
-.serie-ed .marca{text-align:right;font-size:13px;font-weight:600;color:var(--ambar);
-  font-variant-numeric:tabular-nums;white-space:nowrap}
-.serie-ed .marca.nada{color:var(--fraco);font-weight:400}
+
+.serie-ed .marca{grid-column:1/-1;text-align:right;font-size:11.5px;
+  color:var(--ambar);font-variant-numeric:tabular-nums;padding-top:5px}
+.serie-ed .marca.nada{color:var(--fraco)}
 .serie-ed.porfazer input,.serie-ed.porfazer .n{opacity:.62}
 .serie-ed.recorde .n{color:var(--ambar)}
 
@@ -1923,9 +1933,18 @@ function curvaDe(exercicioId) {
 
 function cabecalhoDasLinhas(tipo) {
   if (tipo !== 'peso_reps') return '';
+  // Onze colunas, as mesmas da linha: n, -, kg, +, -, reps, +, feito, -, RIR, +
   return '<div class="linhas-cab">' +
-    '<span></span><span>kg</span><span></span><span>reps</span>' +
-    '<span>feito</span><span>RIR</span><span>máx</span></div>';
+    '<span></span><span></span><span>kg</span><span></span>' +
+    '<span></span><span>reps</span><span></span>' +
+    '<span>feito</span>' +
+    '<span></span><span>RIR</span><span></span></div>';
+}
+
+/* Um menos e um mais a ladear um campo. */
+function botaoPasso(campo, delta, sinal) {
+  return '<button class="passo-b" data-ajuste="' + campo + ':' + delta + '" ' +
+    'aria-label="' + (delta < 0 ? 'diminuir ' : 'aumentar ') + campo + '">' + sinal + '</button>';
 }
 
 function linhaEditavel(s, n, pr, tipo) {
@@ -1941,19 +1960,36 @@ function linhaEditavel(s, n, pr, tipo) {
   return '<div class="serie-ed' + (feita ? '' : ' porfazer') + (pr ? ' recorde' : '') +
       '" data-linha="' + s.id + '">' +
     '<div class="n">' + n + '</div>' +
+
+    botaoPasso('peso', -2.5, '&minus;') +
     '<input type="number" inputmode="decimal" step="any" data-campo="peso" value="' +
       (Number.isFinite(s.peso) ? s.peso : '') + '" aria-label="peso">' +
-    '<div class="x">×</div>' +
+    botaoPasso('peso', 2.5, '+') +
+
+    botaoPasso('reps', -1, '&minus;') +
     '<input type="number" inputmode="numeric" data-campo="reps" value="' +
       (Number.isFinite(s.reps) ? s.reps : '') + '" aria-label="repetições">' +
+    botaoPasso('reps', 1, '+') +
+
     '<button class="feito' + (feita ? ' on' : '') + '" data-campo="feita" ' +
       'aria-label="marcar como feita">✓</button>' +
+
+    botaoPasso('rir', -1, '&minus;') +
     '<input type="number" inputmode="numeric" class="rir" min="0" max="10" ' +
       'data-campo="rir" placeholder="—" value="' +
       (Number.isFinite(s.rir) ? s.rir : '') + '" aria-label="RIR">' +
+    botaoPasso('rir', 1, '+') +
+
     '<div class="marca' + (marca === null ? ' nada' : '') + '" data-campo="marca">' +
-      (marca === null ? '—' : num(marca)) + '</div>' +
+      textoDaMarca(s.reps, marca) + '</div>' +
     '</div>';
+}
+
+/* O texto da marca a bater, por baixo da linha. */
+function textoDaMarca(reps, marca) {
+  if (!Number.isFinite(reps) || reps < 1) return 'máx —';
+  if (marca === null) return 'máx a ' + plural(reps, 'rep', 'reps') + ': ainda nenhuma';
+  return 'máx a ' + plural(reps, 'rep', 'reps') + ': ' + kg(marca);
 }
 
 /* Liga os campos das linhas editaveis. Grava a cada alteracao: nao ha botao
@@ -1973,9 +2009,50 @@ function ligarLinhasEditaveis() {
     function actualizarMarca() {
       var alvo = linha.querySelector('[data-campo="marca"]');
       var marca = melhorPesoParaReps(curvaDe(s.exercicioId), s.reps);
-      alvo.textContent = marca === null ? '—' : num(marca);
+      alvo.textContent = textoDaMarca(s.reps, marca);
       alvo.classList.toggle('nada', marca === null);
     }
+
+    /* Os menos e os mais. Cada campo tem o seu passo e os seus limites. */
+    Array.prototype.forEach.call(linha.querySelectorAll('[data-ajuste]'), function (b) {
+      b.onclick = function () {
+        var p = b.dataset.ajuste.split(':');
+        var campo = p[0], delta = parseFloat(p[1]);
+        var el = linha.querySelector('[data-campo="' + campo + '"]');
+
+        if (campo === 'peso') {
+          var novo = (Number.isFinite(s.peso) ? s.peso : 0) + delta;
+          s.peso = Math.max(0, Math.round(novo * 100) / 100);
+          el.value = s.peso;
+
+        } else if (campo === 'reps') {
+          // Para em 1 e nao desce a vazio: carregar uma vez a mais no menos
+          // nao pode apagar as repeticoes da serie sem querer. Para as tirar
+          // mesmo, escreve-se por cima.
+          if (!Number.isFinite(s.reps)) {
+            s.reps = delta > 0 ? 1 : null;
+          } else {
+            s.reps = Math.max(1, s.reps + delta);
+          }
+          el.value = s.reps === null ? '' : s.reps;
+          actualizarMarca();
+
+        } else {
+          // RIR: de vazio, o mais poe 0. O menos a partir do 0 volta a vazio,
+          // que e como se diz "nao registei".
+          if (!Number.isFinite(s.rir)) {
+            s.rir = delta > 0 ? 0 : null;
+          } else {
+            var v = s.rir + delta;
+            s.rir = v < 0 ? null : Math.min(10, v);
+          }
+          el.value = s.rir === null ? '' : s.rir;
+        }
+
+        vibrar(8);
+        guardar(false);
+      };
+    });
 
     linha.querySelector('[data-campo="peso"]').onchange = function () {
       var v = parseFloat(this.value);
