@@ -143,6 +143,21 @@ a{color:var(--azul)}
 .mini-b:active{background:var(--azul);color:#fff}
 .mini-b.tirar:active{background:var(--vermelho);color:#fff}
 
+/* Tira das marcas por numero de repeticoes, debaixo do nome do exercicio.
+   Rola de lado quando ha muitas — mais vale rolar do que encolher a letra
+   ate nao se ler. */
+.tira-pr{display:flex;gap:5px;overflow-x:auto;-webkit-overflow-scrolling:touch;
+  padding:7px 12px 8px;border-bottom:1px solid var(--borda);scrollbar-width:none}
+.tira-pr::-webkit-scrollbar{display:none}
+.tira-pr .pr{flex:none;display:flex;align-items:baseline;gap:3px;
+  background:var(--sup2);border-radius:7px;padding:4px 7px;
+  font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tira-pr .pr b{color:var(--fraco);font-weight:600;font-size:11px}
+.tira-pr .pr i{color:var(--ambar);font-weight:700;font-style:normal}
+.tira-pr .pr.hoje{background:rgba(245,158,11,.16)}
+.tira-pr .rot{flex:none;align-self:center;font-size:10px;font-weight:700;
+  color:var(--fraco);text-transform:uppercase;letter-spacing:.04em;padding-right:2px}
+
 /* Campos */
 .campo{display:block;margin-bottom:14px}
 .campo > span{display:block;font-size:13px;color:var(--suave);margin-bottom:6px;font-weight:600}
@@ -1879,6 +1894,9 @@ function renderDia() {
             'aria-label="acrescentar uma série">+</button>' +
         '</div>';
       var tipoBloco = tipoDoExercicio(e);
+      if (tipoBloco === 'peso_reps') {
+        html += tiraDeMarcas(bloco.id, bloco.series.map(function (s) { return s.reps; }));
+      }
       html += cabecalhoDasLinhas(tipoBloco);
       bloco.series.forEach(function (s, i) {
         html += linhaEditavel(s, i + 1, prs[s.id], tipoBloco);
@@ -1967,6 +1985,23 @@ function cabecalhoDasLinhas(tipo) {
   // Cinco colunas, as mesmas da linha: n, kg, reps, feito, RIR
   return '<div class="linhas-cab">' +
     '<span></span><span>kg</span><span>reps</span><span>feito</span><span>RIR</span></div>';
+}
+
+/* A tira com a carga maxima para cada numero de repeticoes, para se ver de
+   relance o que ha a bater sem sair do treino. As repeticoes que se estao a
+   fazer hoje neste exercicio ficam realcadas. */
+function tiraDeMarcas(exercicioId, repsDeHoje) {
+  var linhas = recordesPorReps(Estado.series, exercicioId);
+  if (!linhas.length) return '';
+
+  var hoje = {};
+  (repsDeHoje || []).forEach(function (r) { if (Number.isFinite(r)) hoje[r] = true; });
+
+  return '<div class="tira-pr"><span class="rot">máx</span>' +
+    linhas.map(function (l) {
+      return '<span class="pr' + (hoje[l.reps] ? ' hoje' : '') + '">' +
+        '<b>' + l.reps + '×</b><i>' + num(l.peso) + '</i></span>';
+    }).join('') + '</div>';
 }
 
 /* Um campo com o menos e o mais dentro da mesma caixa. */
