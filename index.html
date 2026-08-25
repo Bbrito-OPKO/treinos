@@ -1351,6 +1351,49 @@ var Estado = {
   _melhores: null
 };
 
+/* ===========================================================================
+   Proteger os dados de serem apagados pelo iOS
+
+   O Safari apaga a IndexedDB de um site ao fim de 7 dias sem lá se voltar.
+   Uma app adicionada ao ecra principal esta isenta disso — por isso e que
+   isso nao e uma sugestao, e a diferenca entre ter e nao ter o historico.
+
+   Alem disso pede-se armazenamento persistente, que noutros browsers tira o
+   site da lista dos que podem ser limpos quando o disco aperta.
+   ======================================================================== */
+
+var Armazenamento = {
+  noEcraPrincipal: false,
+  persistente: null,      // true, false, ou null quando o browser nao diz
+
+  verificar: function () {
+    // O iOS usa navigator.standalone; os outros usam a media query.
+    this.noEcraPrincipal = window.navigator.standalone === true ||
+      (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+
+    var eu = this;
+    if (!navigator.storage || !navigator.storage.persist) return Promise.resolve();
+    return navigator.storage.persisted()
+      .then(function (ja) { return ja ? true : navigator.storage.persist(); })
+      .then(function (ok) { eu.persistente = ok; })
+      .catch(function () { eu.persistente = null; });
+  },
+
+  /* O aviso que aparece enquanto a app nao estiver no ecra principal. */
+  aviso: function () {
+    if (this.noEcraPrincipal) return '';
+    return '<div class="cartao" style="border-color:var(--ambar)">' +
+      '<h3 style="color:var(--ambar)">Ainda não está no ecrã principal</h3>' +
+      '<p class="pequeno suave" style="margin:0">No iPhone, o Safari apaga os dados de um ' +
+      'site ao fim de 7 dias sem lá voltares. Uma app adicionada ao ecrã principal está ' +
+      'isenta disso.</p>' +
+      '<p class="pequeno suave">Partilhar &rsaquo; Adicionar ao ecrã principal. ' +
+      'Depois abre-a sempre pelo ícone.</p>' +
+      '<p class="mini fraco" style="margin-bottom:0">Enquanto isso não acontecer, guarda ' +
+      'um backup em Exercícios &rsaquo; Dados.</p></div>';
+  }
+};
+
 function hojeIso() {
   var d = new Date();
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') +
@@ -1843,7 +1886,7 @@ function renderDia() {
   acao.textContent = 'Dia';
   acao.onclick = escolherDia;
 
-  var html = '';
+  var html = Armazenamento.aviso();
 
   if (!series.length) {
     html += '<div class="vazio">' +
@@ -3464,8 +3507,7 @@ function renderExercicios() {
     '<button class="btn larga fina" id="dImportarBackup" style="margin-top:8px">Importar backup (JSON)</button>' +
     '<button class="btn larga fina" id="dExportarJson" style="margin-top:8px">Guardar backup (JSON)</button>' +
     '<button class="btn larga fina" id="dExportarCsv" style="margin-top:8px">Guardar em CSV</button>' +
-    '<p class="mini fraco" style="margin:12px 0 0">Os dados vivem só neste telemóvel. ' +
-    'Guarda um backup de vez em quando — é a única cópia que existe.</p></div>';
+    estadoDoBackup() + '</div>';
 
   $('#v-exercicios').innerHTML = html;
 
@@ -3476,6 +3518,43 @@ function renderExercicios() {
   $('#dImportarBackup').onclick = function () { pedirFicheiro('.json,application/json', importarBackupFicheiro); };
   $('#dExportarJson').onclick = exportarJson;
   $('#dExportarCsv').onclick = exportarCsv;
+}
+
+/* Ha quanto tempo foi o ultimo backup, e em que estado esta o armazenamento.
+   Nao ha servidor nenhum: o backup e mesmo a unica copia que existe. */
+function estadoDoBackup() {
+  var ultimo = Estado.definicoes.ultimoBackup;
+  var linhas = [];
+
+  if (!Estado.series.length) {
+    linhas.push('<p class="mini fraco" style="margin:12px 0 0">Ainda não há nada para guardar.</p>');
+  } else if (!ultimo) {
+    linhas.push('<p class="pequeno" style="margin:12px 0 0;color:var(--ambar)">' +
+      'Nunca guardaste um backup. Os dados vivem só neste telemóvel — não há cópia ' +
+      'em mais lado nenhum.</p>');
+  } else {
+    var dias = diasEntre(ultimo, hojeIso());
+    var cor = dias > 21 ? 'var(--ambar)' : 'var(--suave)';
+    linhas.push('<p class="pequeno" style="margin:12px 0 0;color:' + cor + '">Último backup: ' +
+      (dias === 0 ? 'hoje' : dias === 1 ? 'ontem' : 'há ' + dias + ' dias') +
+      ' (' + esc(dataCurta(ultimo)) + ').' +
+      (dias > 21 ? ' Já vai longe.' : '') + '</p>');
+  }
+
+  if (Armazenamento.persistente === false) {
+    linhas.push('<p class="mini fraco" style="margin-bottom:0">O browser não garantiu ' +
+      'armazenamento permanente. Mais uma razão para guardares backups.</p>');
+  } else if (Armazenamento.persistente === true) {
+    linhas.push('<p class="mini fraco" style="margin-bottom:0">Armazenamento marcado como ' +
+      'permanente por este browser.</p>');
+  }
+
+  return linhas.join('');
+}
+
+function guardarDefinicao(chave, valor) {
+  Estado.definicoes[chave] = valor;
+  return BD.guardar('definicoes', { chave: chave, valor: valor });
 }
 
 function fichaExercicio(id) {
@@ -3743,7 +3822,10 @@ function exportarJson() {
     pesagens: Estado.pesagens
   };
   descarregar('treinos-' + hojeIso() + '.json', JSON.stringify(backup), 'application/json');
-  avisar('Backup guardado');
+  guardarDefinicao('ultimoBackup', hojeIso()).then(function () {
+    avisar('Backup guardado');
+    render();
+  });
 }
 
 function exportarCsv() {
@@ -3882,7 +3964,8 @@ function arrancar() {
   $('#cronoMais').onclick = function () { Crono.juntar(30); };
   $('#cronoParar').onclick = function () { Crono.parar(); };
 
-  return BD.abrir()
+  return Armazenamento.verificar()
+    .then(function () { return BD.abrir(); })
     .then(carregarTudo)
     .then(function () {
       if (!Estado.exercicios.length) return semearExercicios();
