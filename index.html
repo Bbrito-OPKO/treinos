@@ -1430,6 +1430,7 @@ function reindexar() {
   Estado._recordes = null;
   Estado._melhores = null;
   Estado._curvas = null;
+  Estado._marcas = null;
 }
 
 function exercicioPorId(id) { return Estado._porId[id] || null; }
@@ -1946,12 +1947,15 @@ function renderDia() {
       var grupo = e ? e.grupo : '';
       html += '<div class="lista">' +
         '<div class="cab-ex">' +
-          '<button class="nome" data-abrir-ex="' + bloco.id + '">' +
+          // O nome abre e fecha as cargas maximas; a seta e que leva ao ecra
+          // do exercicio.
+          '<button class="nome" data-marcas-de="' + bloco.id + '">' +
             '<span class="crescer"><span style="font-weight:600;display:block">' + esc(nome) + '</span>' +
             '<span class="mini fraco">' + esc(grupo) + ' · ' +
-              plural(bloco.series.length, 'série', 'séries') + '</span></span>' +
-            '<span class="seta">&#8250;</span>' +
+              plural(bloco.series.length, 'série', 'séries') + ' · máx</span></span>' +
           '</button>' +
+          '<button class="mini-b" data-abrir-ex="' + bloco.id + '" ' +
+            'aria-label="abrir o exercício">&#8250;</button>' +
           '<button class="mini-b tirar" data-tirar-serie="' + bloco.id + '" ' +
             'aria-label="tirar uma série">&minus;</button>' +
           '<button class="mini-b" data-por-serie="' + bloco.id + '" ' +
@@ -1995,6 +1999,16 @@ function renderDia() {
     b.onclick = function () {
       Estado.exercicioAtivo = +b.dataset.abrirEx;
       render();
+    };
+  });
+  // Abrir e fechar as cargas maximas sem refazer o ecra: assim nao se perde
+  // a posicao da lista a meio de um treino.
+  Array.prototype.forEach.call(document.querySelectorAll('[data-marcas-de]'), function (b) {
+    b.onclick = function () {
+      var tira = document.querySelector('[data-marcas="' + b.dataset.marcasDe + '"]');
+      if (!tira) { avisar('Ainda não há marcas neste exercício'); return; }
+      tira.hidden = !tira.hidden;
+      vibrar(8);
     };
   });
   Array.prototype.forEach.call(document.querySelectorAll('[data-por-serie]'), function (b) {
@@ -2044,6 +2058,15 @@ function curvaDe(exercicioId) {
   return Estado._curvas[exercicioId];
 }
 
+/* As linhas de carga maxima de um exercicio, tambem guardadas. */
+function marcasDe(exercicioId) {
+  if (!Estado._marcas) Estado._marcas = {};
+  if (!Estado._marcas[exercicioId]) {
+    Estado._marcas[exercicioId] = recordesPorReps(Estado.series, exercicioId);
+  }
+  return Estado._marcas[exercicioId];
+}
+
 function cabecalhoDasLinhas(tipo) {
   if (tipo !== 'peso_reps') return '';
   // Cinco colunas, as mesmas da linha: n, kg, reps, feito, RIR
@@ -2055,13 +2078,15 @@ function cabecalhoDasLinhas(tipo) {
    relance o que ha a bater sem sair do treino. As repeticoes que se estao a
    fazer hoje neste exercicio ficam realcadas. */
 function tiraDeMarcas(exercicioId, repsDeHoje) {
-  var linhas = recordesPorReps(Estado.series, exercicioId);
+  var linhas = marcasDe(exercicioId);
   if (!linhas.length) return '';
 
   var hoje = {};
   (repsDeHoje || []).forEach(function (r) { if (Number.isFinite(r)) hoje[r] = true; });
 
-  return '<div class="tira-pr"><span class="rot">máx</span>' +
+  // Fechada por defeito: abre-se ao carregar no nome do exercicio.
+  return '<div class="tira-pr" data-marcas="' + exercicioId + '" hidden>' +
+    '<span class="rot">máx</span>' +
     linhas.map(function (l) {
       return '<span class="pr' + (hoje[l.reps] ? ' hoje' : '') + '">' +
         '<b>' + l.reps + '×</b><i>' + num(l.peso) + '</i></span>';
