@@ -52,27 +52,22 @@ test('os campos de numero nao fazem o Safari dar zoom', () => {
   assert.ok(+m[1] >= 16, 'os campos tem ' + m[1] + 'px; abaixo de 16 o Safari da zoom');
 });
 
-test('os campos abrem o teclado numerico certo', () => {
-  // O inputmode e montado a partir da tabela CAMPOS, por isso e a tabela que
-  // se verifica — e nao um inputmode="decimal" escrito a mao no HTML.
-  assert.match(html, /inputmode="'\s*\+\s*modo\s*\+\s*'"/,
-    'os campos tem de emitir um inputmode');
+test('os campos das séries abrem o teclado numérico certo', () => {
+  // As séries editam-se nas linhas do treino, e é lá que os campos vivem.
+  const linha = html.match(/function linhaEditavel\(([\s\S]*?)\n\}/);
+  assert.ok(linha, 'não encontrei a linha editável');
 
-  const tabela = html.match(/var CAMPOS = \{([\s\S]*?)\n\};/);
-  assert.ok(tabela, 'nao encontrei a tabela CAMPOS');
-  const spec = (nome) => {
-    const m = tabela[1].match(new RegExp(nome + ":\\s*\\{[^}]*modo:\\s*'(\\w+)'"));
-    return m && m[1];
-  };
-  assert.equal(spec('peso'), 'decimal', 'o peso precisa de vírgula');
-  assert.equal(spec('reps'), 'numeric', 'as reps são inteiras');
-  assert.equal(spec('tempoSeg'), 'numeric');
-  assert.equal(spec('tempoMin'), 'decimal');
-  assert.equal(spec('distancia'), 'decimal');
+  // O peso precisa de vírgula; as reps e o RIR são inteiros.
+  assert.match(linha[1], /caixaComPassos\('peso',[^)]*inputmode="decimal"/,
+    'o peso tem de abrir o teclado com vírgula');
+  assert.match(linha[1], /caixaComPassos\('reps',[^)]*inputmode="numeric"/,
+    'as reps são inteiras');
+  assert.match(linha[1], /caixaComPassos\('rir',[\s\S]{0,200}?inputmode="numeric"/,
+    'o RIR é inteiro');
 });
 
 test('os tres tipos de exercicio tem campos proprios', () => {
-  // Sem isto, registar uma ida de bicicleta pedia peso e repeticoes.
+  // Sem isto, uma ida de bicicleta era tratada como peso e repetições.
   const m = html.match(/var CAMPOS_POR_TIPO = \{([\s\S]*?)\n\};/);
   assert.ok(m, 'nao encontrei CAMPOS_POR_TIPO');
   for (const tipo of ['peso_reps', 'peso_tempo', 'distancia_tempo']) {
@@ -80,6 +75,15 @@ test('os tres tipos de exercicio tem campos proprios', () => {
   }
   assert.match(m[1], /distancia_tempo:\s*\['tempoMin',\s*'distancia'\]/,
     'o cardio nao pode pedir peso nem repeticoes');
+});
+
+test('o ecrã só se mantém ligado pela via oficial', () => {
+  // Wake Lock, e nada de truques com vídeos escondidos a tocar em loop.
+  assert.match(html, /navigator\.wakeLock\.request\('screen'\)/);
+  // O bloqueio é largado pelo sistema quando a app sai de vista: sem voltar a
+  // pedi-lo, o ecrã apagava-se para sempre a partir da primeira vez.
+  assert.match(html, /visibilitychange[\s\S]{0,200}Ecra\.pedir\(\)/);
+  assert.ok(!/<video/i.test(html), 'nada de vídeos escondidos para enganar o iOS');
 });
 
 test('nao ha nada vindo da rede', () => {

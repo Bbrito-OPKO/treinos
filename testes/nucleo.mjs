@@ -26,7 +26,7 @@ const NOMES = [
   'curvaRepMax', 'melhorPesoParaReps', 'recordesPorReps',
   'agregarPorPeriodo', 'mediaRir', 'progressaoExercicio', 'pesoPorDiaParaReps',
   'recuarDias', 'PERIODOS', 'intervaloDoPeriodo', 'filtrarPorIntervalo',
-  'progressoDeObjetivo'
+  'progressoDeObjetivo', 'estimarPesoParaReps', 'estimativasPorReps'
 ];
 
 function extrair() {

@@ -331,6 +331,25 @@ a{color:var(--azul)}
   outline:2px solid var(--verde);outline-offset:2px}
 .calendario button[disabled]{opacity:.35}
 
+/* Tabela da estimativa por repeticoes: reps, estimado, feito, folga. */
+.linhas-est{display:grid;grid-template-columns:44px 1fr 1fr 1fr;gap:6px;
+  padding:7px 2px;border-bottom:1px solid var(--borda);font-size:14px;
+  align-items:center}
+.linhas-est:last-of-type{border-bottom:0}
+.linhas-est span{text-align:right}
+.linhas-est span:first-child{text-align:left}
+.linhas-est.fraca{opacity:.45}
+.cab-est{font-size:10px;font-weight:700;color:var(--fraco);text-transform:uppercase;
+  letter-spacing:.03em;border-bottom:1px solid var(--borda);padding-bottom:5px}
+
+/* Interruptor tipo iOS. */
+.interruptor{flex:none;width:52px;height:31px;border-radius:99px;background:var(--sup3);
+  padding:2px;display:flex;align-items:center;transition:background .18s}
+.interruptor.on{background:var(--verde)}
+.interruptor span{width:27px;height:27px;border-radius:50%;background:#fff;
+  transition:transform .18s;box-shadow:0 1px 3px rgba(0,0,0,.4)}
+.interruptor.on span{transform:translateX(21px)}
+
 .selseg{display:flex;background:var(--sup2);border-radius:10px;padding:3px;gap:3px;margin-bottom:14px}
 .selseg button{flex:1;min-height:36px;border-radius:8px;font-size:14px;font-weight:600;
   color:var(--suave)}
@@ -1299,6 +1318,56 @@ function filtrarPorIntervalo(series, intervalo) {
 }
 
 /* --------------------------------------------------------------------------
+   Estimativa de carga por numero de repeticoes
+
+   O contrario do 1RM: partindo do 1RM estimado, quanto se deveria conseguir
+   levantar a 1, 2, 3... repeticoes. Serve para ver onde ha folga — se a
+   estimativa diz 105 kg a 8 e a marca feita e 100, ha 5 kg por explorar.
+
+   E uma estimativa e nao uma promessa: sai das mesmas formulas do 1RM, e
+   essas ja sao aproximacoes. Acima de 15 repeticoes vale pouco.
+   ----------------------------------------------------------------------- */
+
+function estimarPesoParaReps(rm1, reps) {
+  if (!Number.isFinite(rm1) || rm1 <= 0) return null;
+  if (!Number.isFinite(reps) || reps < 1) return null;
+  // Com 1 repeticao a estimativa e o proprio 1RM, para ficar coerente com a
+  // epley() e a brzycki(), que devolvem o peso quando reps e 1.
+  if (reps === 1) return { epley: rm1, brzycki: rm1, media: rm1 };
+  var e = rm1 / (1 + reps / 30);
+  var b = reps >= 37 ? null : rm1 * (37 - reps) / 36;
+  var valores = [e, b].filter(function (v) { return v !== null; });
+  return {
+    epley: e,
+    brzycki: b,
+    media: valores.reduce(function (a, v) { return a + v; }, 0) / valores.length
+  };
+}
+
+/* Uma linha por numero de repeticoes, com a estimativa e, quando existe, a
+   marca que foi mesmo feita. */
+function estimativasPorReps(rm1, curva, ateReps) {
+  var limite = ateReps || 12;
+  var linhas = [];
+  for (var r = 1; r <= limite; r++) {
+    var est = estimarPesoParaReps(rm1, r);
+    if (!est) continue;
+    var feito = curva ? melhorPesoParaReps(curva, r) : null;
+    linhas.push({
+      reps: r,
+      estimativa: est.media,
+      epley: est.epley,
+      brzycki: est.brzycki,
+      feito: feito,
+      // Positivo = ha folga entre o que se estima e o que ja se fez.
+      folga: feito === null ? null : est.media - feito,
+      fiavel: r <= LIMITE_FIAVEL
+    });
+  }
+  return linhas;
+}
+
+/* --------------------------------------------------------------------------
    Objetivos
 
    Um objetivo sao quatro coisas: onde se estava quando se decidiu (inicial,
@@ -1609,6 +1678,61 @@ var Armazenamento = {
       'em quando, de qualquer forma.</p></div>';
   }
 };
+
+/* ===========================================================================
+   Manter o ecra ligado
+
+   Entre series passam-se dois minutos sem se tocar no telemovel, e o ecra
+   apaga-se. Voltar a acender e desbloquear a meio de um treino e chato.
+
+   O bloqueio e largado pelo sistema sempre que a app deixa de estar a vista
+   (mudar de app, bloquear o telemovel), por isso tem de ser pedido outra vez
+   quando ela volta — nao basta pedir uma vez ao arrancar.
+
+   Existe no iPhone a partir do iOS 16.4. Quando nao existe, diz-se; nao se
+   finge que ficou ligado.
+   ======================================================================== */
+
+var Ecra = {
+  suportado: typeof navigator !== 'undefined' && 'wakeLock' in navigator,
+  bloqueio: null,
+
+  querAtivo: function () {
+    // Ligado por defeito: foi para isso que foi pedido.
+    return Estado.definicoes.ecraSempreLigado !== false;
+  },
+
+  pedir: function () {
+    if (!this.suportado || !this.querAtivo() || this.bloqueio) return Promise.resolve(false);
+    var eu = this;
+    return navigator.wakeLock.request('screen').then(function (b) {
+      eu.bloqueio = b;
+      b.addEventListener('release', function () { eu.bloqueio = null; });
+      return true;
+    }).catch(function () {
+      // O sistema pode recusar (bateria fraca, por exemplo). Nao ha nada a
+      // fazer e nao vale a pena chatear com um aviso.
+      eu.bloqueio = null;
+      return false;
+    });
+  },
+
+  largar: function () {
+    if (!this.bloqueio) return Promise.resolve();
+    var b = this.bloqueio;
+    this.bloqueio = null;
+    return b.release().catch(function () { /* ja estava largado */ });
+  },
+
+  aplicar: function () {
+    return this.querAtivo() ? this.pedir() : this.largar();
+  }
+};
+
+/* Quando a app volta a estar a vista, o bloqueio tem de ser pedido de novo. */
+document.addEventListener('visibilitychange', function () {
+  if (!document.hidden) Ecra.pedir();
+});
 
 function hojeIso() {
   var d = new Date();
@@ -2771,47 +2895,14 @@ function copiarTreino(deData) {
     });
 }
 
-/* --------------------------------------------------------------------------
-   Registo de series
-
-   Nem todos os exercicios se medem da mesma maneira. O ecra muda conforme o
-   tipo, senao a bicicleta pedia peso e repeticoes, que ela nao tem:
-
-     peso_reps        kg + repeticoes      (o normal)
-     peso_tempo       kg + duracao         (prancha, isometricos)
-     distancia_tempo  duracao + distancia  (bicicleta, passadeira, elitica)
-
-   O tempo e guardado sempre em segundos. No ecra aparece em minutos para o
-   cardio e em segundos para os isometricos, que e como se pensa em cada um.
-   ----------------------------------------------------------------------- */
-
 var CAMPOS_POR_TIPO = {
   peso_reps: ['peso', 'reps'],
   peso_tempo: ['peso', 'tempoSeg'],
   distancia_tempo: ['tempoMin', 'distancia']
 };
 
-var CAMPOS = {
-  peso:      { rotulo: 'Peso (kg)', passo: 2.5, modo: 'decimal' },
-  reps:      { rotulo: 'Reps', passo: 1, modo: 'numeric' },
-  tempoSeg:  { rotulo: 'Tempo (s)', passo: 15, modo: 'numeric' },
-  tempoMin:  { rotulo: 'Tempo (min)', passo: 1, modo: 'decimal' },
-  distancia: { rotulo: 'Distância (m)', passo: 100, modo: 'decimal' },
-  descanso:  { rotulo: 'Descanso', passo: 30, modo: 'numeric' }
-};
-
 function tipoDoExercicio(e) {
   return CAMPOS_POR_TIPO[e && e.tipo] ? e.tipo : 'peso_reps';
-}
-
-/* O valor que cada campo mostra, tirado de uma serie ja feita. */
-function valorDoCampo(campo, serie) {
-  if (!serie) return null;
-  if (campo === 'tempoMin') {
-    return Number.isFinite(serie.tempoSeg) ? Math.round(serie.tempoSeg / 60 * 10) / 10 : null;
-  }
-  var v = serie[campo];
-  return Number.isFinite(v) ? v : null;
 }
 
 /* Descreve uma serie em texto curto, conforme o tipo. Serve para o botao de
@@ -2833,117 +2924,100 @@ function descreverSerie(s, tipo) {
   return '—';
 }
 
+/* --------------------------------------------------------------------------
+   Ecra de um exercicio
+
+   Aberto ao carregar no nome (ou na seta) dentro do treino. Nao se registam
+   series aqui: isso faz-se nas linhas do proprio treino, com o + do topo do
+   exercicio e o visto de cada serie. Este ecra e so para ver:
+
+     1. o que se fez da ultima vez
+     2. a carga maxima por numero de repeticoes
+     3. a estimativa do que se deveria conseguir em cada numero de repeticoes
+   ----------------------------------------------------------------------- */
+
 function renderRegisto() {
   var e = exercicioPorId(Estado.exercicioAtivo);
   if (!e) { Estado.exercicioAtivo = null; return render(); }
 
   var tipo = tipoDoExercicio(e);
-  var campos = CAMPOS_POR_TIPO[tipo];
   var data = Estado.dataAtual;
-  var hoje = seriesDoDia(data).filter(function (s) { return s.exercicioId === e.id; });
   var todas = seriesDoExercicio(e.id);
   var prs = recordes();
 
   $('#titulo').textContent = e.nome;
+  $('#titulo').hidden = false;
   $('#btVoltar').hidden = false;
   var acao = $('#btAcao');
   acao.hidden = false;
   acao.textContent = 'Ficha';
   acao.onclick = function () { fichaExercicio(e.id); };
 
-  // Os campos comecam preenchidos com a ultima serie deste exercicio: a de
-  // hoje se ja houver, senao a do ultimo dia em que foi feito.
-  var ultima = hoje[hoje.length - 1] || sugestaoAnterior(e.id);
-  var rirInicial = ultima && Number.isFinite(ultima.rir) ? ultima.rir : null;
-  var repetivel = hoje[hoje.length - 1];
+  var html = '';
 
-  // O cardio nao leva RIR: nao ha repeticoes de reserva numa bicicleta.
-  var temRir = tipo !== 'distancia_tempo';
-
-  var html = '<div id="registo"><div class="tres">' +
-    campos.concat(['descanso']).map(function (c) {
-      var spec = CAMPOS[c];
-      var valor = c === 'descanso' ? descansoDoExercicio(e) : valorDoCampo(c, ultima);
-      return passoNumerico(c, spec.rotulo, valor, spec.modo, spec.passo);
-    }).join('') +
-    '</div>' +
-    (temRir
-      ? '<div class="rir-escolha" id="rirEscolha">' +
-          [0, 1, 2, 3, 4, 5].map(function (v) {
-            return '<button data-rir="' + v + '"' + (rirInicial === v ? ' class="on"' : '') +
-                   '>' + v + '</button>';
-          }).join('') +
-          '<button data-rir=""' + (rirInicial === null ? ' class="on"' : '') + '>—</button>' +
-        '</div>'
-      : '') +
-    // A marca daquele numero de repeticoes, mesmo por cima do botao de gravar:
-    // e ali que faz falta saber se o peso que se vai meter bate alguma coisa.
-    (tipo === 'peso_reps' ? '<div id="prReps" class="linha entre pequeno" ' +
-      'style="padding:8px 2px 10px"></div>' : '') +
-    '<button class="btn verde larga" id="btGravar">Gravar série</button>' +
-    (repetivel ? '<button class="btn larga fina" id="btRepetir" style="margin-top:8px">' +
-      'Repetir a anterior (' + esc(descreverSerie(repetivel, tipo)) + ')</button>' : '') +
-    '</div>';
-
-  if (hoje.length) {
-    html += '<div class="lista"><div class="cab">Hoje · ' +
-      plural(hoje.length, 'série', 'séries') + '</div>' +
-      cabecalhoDasLinhas(tipo);
-    hoje.forEach(function (s, i) { html += linhaEditavel(s, i + 1, prs[s.id], tipo); });
-    html += '</div>';
-  }
-
-  // O que se fez da ultima vez: e a informacao que mais falta na altura de
-  // decidir o peso da proxima serie.
+  /* --- 1. O ultimo treino deste exercicio --- */
   var anteriores = todas.filter(function (s) { return s.data < data; });
   if (anteriores.length) {
     var ultimaData = anteriores.map(function (s) { return s.data; }).sort().pop();
     var doDia = anteriores.filter(function (s) { return s.data === ultimaData; })
       .sort(function (a, b) { return a.ordem - b.ordem; });
-    html += '<div class="lista"><div class="cab">' + esc(dataRelativa(ultimaData)) + '</div>';
+    html += '<div class="lista"><div class="cab">Último treino · ' +
+      esc(dataRelativa(ultimaData)) + '</div>';
     doDia.forEach(function (s, i) { html += linhaDeSerie(s, i + 1, prs[s.id]); });
     html += '</div>';
+  } else {
+    html += '<p class="vazio pequeno">Ainda não fizeste este exercício.</p>';
   }
 
-  var m = melhores()[e.id];
-  if (m && tipo === 'peso_reps') {
-    html += '<div class="cartao"><h3>Melhor de sempre</h3><div class="linha entre">' +
-      '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
-        kg(m.pesoMax) + '</div><div class="mini fraco">peso</div></div>' +
-      '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
-        kg(m.melhor1RM) + '</div><div class="mini fraco">1RM estimado</div></div>' +
-      '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
-        m.totalSeries + '</div><div class="mini fraco">séries feitas</div></div>' +
-      '</div></div>';
-    // A carga maxima para cada numero de repeticoes vive aqui, no ecra do
-    // exercicio — que e onde se vai ver o que ha a bater antes de carregar
-    // a barra.
+  if (tipo === 'peso_reps') {
+    /* --- 2. A carga maxima por repeticoes --- */
     html += htmlTabelaRepMax(e.id);
-  } else if (tipo !== 'peso_reps' && todas.length) {
-    var maisLongo = todas.reduce(function (a, s) {
-      return (Number.isFinite(s.tempoSeg) && (!a || s.tempoSeg > a.tempoSeg)) ? s : a;
-    }, null);
-    html += '<div class="cartao"><h3>Melhor de sempre</h3><div class="linha entre">' +
-      '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
-        (maisLongo ? duracaoCurta(maisLongo.tempoSeg) : '—') +
-        '</div><div class="mini fraco">mais tempo</div></div>' +
-      '<div class="centro crescer"><div style="font-size:19px;font-weight:700" class="nums">' +
-        todas.length + '</div><div class="mini fraco">séries feitas</div></div>' +
-      '</div></div>';
+
+    /* --- 3. A estimativa por repeticoes --- */
+    html += htmlEstimativas(e.id);
   }
 
   $('#v-treino').innerHTML = html;
-  ligarRegisto(e, rirInicial);
   ligarLinhasDeSerie();
-  ligarLinhasEditaveis();
 }
 
-function passoNumerico(id, rotulo, valor, modo, passo) {
-  return '<div class="passo"><span>' + esc(rotulo) + '</span>' +
-    '<input id="c' + id + '" type="number" inputmode="' + modo + '" step="any" value="' +
-    (valor === null || valor === undefined ? '' : valor) + '">' +
-    '<div class="mm"><button data-passo="c' + id + ':-' + passo + '">&minus;</button>' +
-    '<button data-passo="c' + id + ':' + passo + '">+</button></div></div>';
+/* A estimativa do que se deveria conseguir em cada numero de repeticoes,
+   a partir do melhor 1RM estimado, e a folga que sobra face ao que ja foi
+   feito. */
+function htmlEstimativas(exercicioId) {
+  var m = melhores()[exercicioId];
+  if (!m || !Number.isFinite(m.melhor1RM)) return '';
+
+  var linhas = estimativasPorReps(m.melhor1RM, curvaDe(exercicioId), 12);
+  if (!linhas.length) return '';
+
+  var s = m.serieDo1RM;
+
+  return '<div class="cartao"><h3>Estimativa por repetições</h3>' +
+    '<p class="mini fraco" style="margin:-4px 0 10px">A partir de um 1RM de ' +
+      kg(m.melhor1RM) + (s ? ', vindo de ' + kg(s.peso) + ' × ' + s.reps +
+      ' em ' + esc(dataLonga(s.data)) : '') + '.</p>' +
+
+    '<div class="linhas-est cab-est">' +
+      '<span>reps</span><span>estimado</span><span>feito</span><span>folga</span></div>' +
+
+    linhas.map(function (l) {
+      var folga = l.folga;
+      var corFolga = folga === null ? 'var(--fraco)'
+        : folga > 0.5 ? 'var(--verde)' : folga < -0.5 ? 'var(--ambar)' : 'var(--fraco)';
+      return '<div class="linhas-est' + (l.fiavel ? '' : ' fraca') + '">' +
+        '<span class="nums suave">' + l.reps + '×</span>' +
+        '<span class="nums" style="font-weight:600">' + num(l.estimativa) + '</span>' +
+        '<span class="nums">' + (l.feito === null ? '—' : num(l.feito)) + '</span>' +
+        '<span class="nums" style="color:' + corFolga + ';font-weight:600">' +
+          (folga === null ? '—' : (folga > 0 ? '+' : '') + num(folga)) + '</span>' +
+        '</div>';
+    }).join('') +
+
+    '<p class="mini fraco" style="margin:12px 0 0">A verde, o que a estimativa diz que ainda ' +
+    'tens por explorar nessas repetições. É uma estimativa e não uma promessa: sai das mesmas ' +
+    'fórmulas do 1RM, que já são aproximações. Das ' + LIMITE_FIAVEL + ' repetições para cima ' +
+    'vale pouco, e por isso essas linhas ficam esbatidas.</p></div>';
 }
 
 /* Sugere os valores da ultima vez que se fez este exercicio. */
@@ -2989,162 +3063,6 @@ function htmlTabelaRepMax(exercicioId) {
         'mais longa.</p>'
       : '') +
     '</div>';
-}
-
-/* A linha que mostra a marca daquelas repeticoes enquanto se escreve.
-   Devolve o HTML, para o mesmo texto servir na primeira pintura e nas
-   actualizacoes. */
-function htmlPrParaReps(exercicioId, reps, pesoAtual) {
-  if (!Number.isFinite(reps) || reps < 1) {
-    return '<span class="fraco">Põe as repetições para veres a marca</span><span></span>';
-  }
-  var quantas = plural(reps, 'rep', 'reps');
-  var marca = recordesPorReps(Estado.series, exercicioId).find(function (l) {
-    return l.reps === reps;
-  });
-  if (!marca) {
-    return '<span class="suave">A ' + esc(quantas) + '</span>' +
-      '<span class="fraco">ainda nunca fizeste</span>';
-  }
-  // Aqui so interessa o numero a bater. O aviso de que a marca ja foi batida
-  // por uma serie mais longa fica para a tabela, que tem espaco para isso.
-  var bate = Number.isFinite(pesoAtual) && pesoAtual > marca.peso;
-  return '<span class="suave">PR a ' + esc(quantas) + '</span>' +
-    '<span class="nums" style="font-weight:700;color:' +
-      (bate ? 'var(--verde)' : 'var(--ambar)') + '">' +
-      (bate ? '↑ bate ' : '') + kg(marca.peso) + '</span>';
-}
-
-function ligarRegisto(e, rirInicial) {
-  var tipo = tipoDoExercicio(e);
-  var campos = CAMPOS_POR_TIPO[tipo];
-  var rirEscolhido = rirInicial === undefined ? null : rirInicial;
-
-  function actualizarPr() {
-    var alvo = document.getElementById('prReps');
-    if (!alvo) return;
-    var reps = parseInt((document.getElementById('creps') || {}).value, 10);
-    var peso = parseFloat((document.getElementById('cpeso') || {}).value);
-    alvo.innerHTML = htmlPrParaReps(e.id, reps, peso);
-  }
-
-  Array.prototype.forEach.call(document.querySelectorAll('[data-passo]'), function (b) {
-    b.onclick = function () {
-      var p = b.dataset.passo.split(':');
-      var campo = document.getElementById(p[0]);
-      var atual = parseFloat(campo.value);
-      if (!Number.isFinite(atual)) atual = 0;
-      var novo = atual + parseFloat(p[1]);
-      campo.value = Math.max(0, Math.round(novo * 100) / 100);
-      actualizarPr();
-      vibrar(8);
-    };
-  });
-
-  ['creps', 'cpeso'].forEach(function (id) {
-    var el = document.getElementById(id);
-    if (el) el.oninput = actualizarPr;
-  });
-  actualizarPr();
-
-  Array.prototype.forEach.call(document.querySelectorAll('#rirEscolha button'), function (b) {
-    b.onclick = function () {
-      Array.prototype.forEach.call(document.querySelectorAll('#rirEscolha button'), function (o) {
-        o.classList.remove('on');
-      });
-      b.classList.add('on');
-      rirEscolhido = b.dataset.rir === '' ? null : +b.dataset.rir;
-    };
-  });
-
-  /* Le os campos do ecra e devolve a serie ja no formato guardado. */
-  function lerCampos() {
-    var s = { peso: null, reps: null, tempoSeg: null, distancia: null };
-    campos.forEach(function (c) {
-      var el = document.getElementById('c' + c);
-      var v = el ? parseFloat(el.value) : NaN;
-      if (!Number.isFinite(v)) return;
-      if (c === 'tempoMin') s.tempoSeg = Math.round(v * 60);
-      else if (c === 'reps') s.reps = Math.round(v);
-      else s[c] = c === 'tempoSeg' ? Math.round(v) : v;
-    });
-    return s;
-  }
-
-  /* Diz o que falta, em vez de gravar uma serie vazia. */
-  function oQueFalta(s) {
-    if (tipo === 'peso_reps') {
-      return (Number.isFinite(s.reps) && s.reps > 0) ? null : 'Faltam as repetições';
-    }
-    if (tipo === 'peso_tempo') {
-      return (Number.isFinite(s.tempoSeg) && s.tempoSeg > 0) ? null : 'Falta o tempo';
-    }
-    var temTempo = Number.isFinite(s.tempoSeg) && s.tempoSeg > 0;
-    var temDistancia = Number.isFinite(s.distancia) && s.distancia > 0;
-    return (temTempo || temDistancia) ? null : 'Falta o tempo ou a distância';
-  }
-
-  function gravar(valores, rir) {
-    var falta = oQueFalta(valores);
-    if (falta) { avisar(falta); return; }
-    if (rir === undefined) rir = rirEscolhido;
-
-    var sessao = garantirSessao(Estado.dataAtual);
-    var doDia = seriesDoDia(Estado.dataAtual);
-    var ordemEx = doDia.filter(function (s) { return s.exercicioId === e.id; }).length
-      ? doDia.find(function (s) { return s.exercicioId === e.id; }).ordemExercicio
-      : new Set(doDia.map(function (s) { return s.exercicioId; })).size;
-
-    var serie = {
-      id: proximoId(Estado.series),
-      sessaoId: sessao.id,
-      exercicioId: e.id,
-      data: Estado.dataAtual,
-      ordemExercicio: ordemEx,
-      ordem: doDia.length,
-      peso: Number.isFinite(valores.peso) ? valores.peso : 0,
-      reps: Number.isFinite(valores.reps) ? valores.reps : null,
-      rir: Number.isFinite(rir) ? rir : null,
-      tempoSeg: Number.isFinite(valores.tempoSeg) ? valores.tempoSeg : null,
-      distancia: Number.isFinite(valores.distancia) ? valores.distancia : null,
-      supersetId: null,
-      nota: null
-    };
-
-    Estado.series.push(serie);
-    reindexar();
-
-    // Ver se a serie que acabou de entrar e recorde, para o dizer logo.
-    var pr = recordes()[serie.id];
-    BD.guardar('series', serie).then(function () {
-      if (pr) { avisar('Recorde! ' + nomeDoRecorde(pr)); vibrar([60, 40, 60, 40, 120]); }
-      var descanso = parseInt(document.getElementById('cdescanso').value, 10);
-      if (Number.isFinite(descanso) && descanso > 0) {
-        Crono.arrancar(descanso);
-        guardarDescanso(e, descanso);
-      }
-      Estado.definicoes.ultimoExercicio = e.id;
-      render();
-    });
-  }
-
-  $('#btGravar').onclick = function () { gravar(lerCampos()); };
-
-  var repetir = $('#btRepetir');
-  if (repetir) {
-    repetir.onclick = function () {
-      var hoje = seriesDoDia(Estado.dataAtual).filter(function (s) { return s.exercicioId === e.id; });
-      var u = hoje[hoje.length - 1];
-      if (u) gravar({ peso: u.peso, reps: u.reps, tempoSeg: u.tempoSeg, distancia: u.distancia }, u.rir);
-    };
-  }
-}
-
-/* Guarda o descanso escolhido como o novo defeito deste exercicio. */
-function guardarDescanso(e, segundos) {
-  if (e.descansoSeg === segundos) return;
-  e.descansoSeg = segundos;
-  BD.guardar('exercicios', e);
 }
 
 function garantirSessao(data) {
@@ -3265,10 +3183,13 @@ function escolherExercicio() {
 
         Array.prototype.forEach.call(lista.querySelectorAll('[data-ex]'), function (b) {
           b.onclick = function () {
+            // Escolher um exercicio poe logo uma serie no dia, por fazer, com
+            // os valores da ultima vez. O ecra do exercicio deixou de ter
+            // campos de registo: quem regista sao as linhas do treino.
             fecharFolha();
-            Estado.exercicioAtivo = +b.dataset.ex;
             Estado.vista = 'treino';
-            render();
+            Estado.exercicioAtivo = null;
+            acrescentarSerie(+b.dataset.ex);
           };
         });
       }
@@ -4182,16 +4103,30 @@ function analisePeso(corpo) {
     return;
   }
 
-  if (pesagens.length > 1) {
-    html += '<div class="cartao"><h3>Evolução · ' + esc(nomeDoPeriodo()) + '</h3>' +
+  // O grafico aparece sempre que haja mais do que uma pesagem. Se o periodo
+  // escolhido nao tiver pontos que cheguem, desenha-se o historico todo e
+  // diz-se que foi isso que se fez — melhor do que o grafico desaparecer sem
+  // explicacao.
+  if (todas.length > 1) {
+    var doGrafico = pesagens.length > 1 ? pesagens : todas;
+    var usouTudo = doGrafico !== pesagens;
+    html += '<div class="cartao"><h3>Evolução · ' +
+      esc(usouTudo ? 'tudo' : nomeDoPeriodo()) + '</h3>' +
       grafLinhas([{ nome: 'Peso', cor: '#22c55e',
-        pontos: pesagens.map(function (p) { return { x: p.data, y: p.kg }; }) }],
+        pontos: doGrafico.map(function (p) { return { x: p.data, y: p.kg }; }) }],
         { altura: 220, desdeZero: false, titulo: 'Peso corporal' }) +
-      (pesagens.length < todas.length
+      (usouTudo
         ? '<p class="mini fraco" style="margin:10px 0 0">' +
-          plural(todas.length - pesagens.length, 'pesagem fora', 'pesagens fora') +
-          ' deste período. Escolhe "Tudo" para as ver.</p>'
-        : '') + '</div>';
+          (pesagens.length
+            ? 'Só há ' + plural(pesagens.length, 'pesagem', 'pesagens') + ' em ' + esc(nomeDoPeriodo()) +
+              ', por isso está aqui o histórico todo.'
+            : 'Não há pesagens em ' + esc(nomeDoPeriodo()) + ', por isso está aqui o histórico todo.') +
+          '</p>'
+        : pesagens.length < todas.length
+          ? '<p class="mini fraco" style="margin:10px 0 0">' +
+            plural(todas.length - pesagens.length, 'pesagem fora', 'pesagens fora') +
+            ' deste período. Escolhe "Tudo" para as ver.</p>'
+          : '') + '</div>';
   }
 
   var primeira = todas[0], ultima = todas[todas.length - 1];
@@ -4411,10 +4346,18 @@ function fichaExercicio(id) {
     '<button class="btn perigo larga" id="fApagar" style="margin-top:8px">Apagar exercício</button>',
     function (corpo) {
       corpo.querySelector('#fRegistar').onclick = function () {
+        // Poe uma serie no treino de hoje, por fazer, e leva-o para la.
         fecharFolha();
         Estado.dataAtual = hojeIso();
-        Estado.exercicioAtivo = id;
-        trocarVista('treino');
+        Estado.exercicioAtivo = null;
+        Estado.vista = 'treino';
+        Array.prototype.forEach.call(document.querySelectorAll('#separadores button'), function (b) {
+          b.classList.toggle('ativa', b.dataset.vista === 'treino');
+        });
+        Array.prototype.forEach.call(document.querySelectorAll('.vista'), function (v) {
+          v.classList.toggle('ativa', v.id === 'v-treino');
+        });
+        acrescentarSerie(id);
       };
       corpo.querySelector('#fEditar').onclick = function () { editarExercicio(id); };
       corpo.querySelector('#fApagar').onclick = function () { apagarExercicio(id); };
@@ -4518,6 +4461,7 @@ function renderDefinicoes() {
   $('#v-definicoes').innerHTML =
     cartaoDados() +
     cartaoDescanso() +
+    cartaoEcra() +
     cartaoVersao() +
     cartaoArmazenamento() +
     cartaoPerigo();
@@ -4550,6 +4494,24 @@ function cartaoDescanso() {
 }
 
 /* --- Versao --- */
+/* --- Manter o ecra ligado enquanto a app estiver aberta --- */
+function cartaoEcra() {
+  var ligado = Ecra.querAtivo();
+  return '<div class="cartao"><h3>Ecrã</h3>' +
+    '<div class="linha entre" style="gap:12px">' +
+      '<div class="crescer"><div style="font-weight:600">Manter o ecrã ligado</div>' +
+      '<div class="mini fraco">Enquanto a app estiver aberta e à vista.</div></div>' +
+      '<button class="interruptor' + (ligado ? ' on' : '') + '" id="ecraLigado" ' +
+        'role="switch" aria-checked="' + ligado + '"><span></span></button>' +
+    '</div>' +
+    (Ecra.suportado
+      ? '<p class="mini fraco" style="margin:12px 0 0">Gasta mais bateria. O sistema pode ' +
+        'recusar quando a bateria estiver fraca.</p>'
+      : '<p class="mini" style="margin:12px 0 0;color:var(--ambar)">Este browser não sabe ' +
+        'fazer isto. No iPhone é preciso iOS 16.4 ou mais recente.</p>') +
+    '</div>';
+}
+
 function cartaoVersao() {
   return '<div class="cartao"><h3>Versão</h3>' +
     '<button class="btn larga fina" id="dProcurarVersao">Procurar atualização</button>' +
@@ -4598,6 +4560,16 @@ function ligarDefinicoes() {
   $('#dExportarJson').onclick = exportarJson;
   $('#dExportarCsv').onclick = exportarCsv;
   $('#dProcurarVersao').onclick = procurarAtualizacao;
+
+  $('#ecraLigado').onclick = function () {
+    var novo = !Ecra.querAtivo();
+    guardarDefinicao('ecraSempreLigado', novo).then(function () {
+      return Ecra.aplicar();
+    }).then(function () {
+      avisar(novo ? 'O ecrã fica ligado' : 'O ecrã volta a apagar-se sozinho');
+      render();
+    });
+  };
 
   $('#dsGuardar').onclick = function () {
     var v = parseInt($('#dsValor').value, 10);
@@ -5004,7 +4976,7 @@ function arrancar() {
     .then(function () {
       if (!Estado.exercicios.length) return semearExercicios();
     })
-    .then(function () { render(); })
+    .then(function () { render(); return Ecra.aplicar(); })
     .catch(function (erro) {
       // Sem base de dados a app nao serve para nada — mais vale dize-lo.
       $('#v-treino').innerHTML = '<div class="vazio">' +
