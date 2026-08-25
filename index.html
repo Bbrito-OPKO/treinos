@@ -148,6 +148,9 @@ a{color:var(--azul)}
    ate nao se ler. */
 .tira-pr{display:flex;gap:5px;overflow-x:auto;-webkit-overflow-scrolling:touch;
   padding:7px 12px 8px;border-bottom:1px solid var(--borda);scrollbar-width:none}
+/* Sem esta linha o display:flex acima ganha ao [hidden]{display:none} do
+   browser e a tira fica sempre a vista, mesmo com o atributo posto. */
+.tira-pr[hidden]{display:none}
 .tira-pr::-webkit-scrollbar{display:none}
 .tira-pr .pr{flex:none;display:flex;align-items:baseline;gap:3px;
   background:var(--sup2);border-radius:7px;padding:4px 7px;
