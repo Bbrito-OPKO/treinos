@@ -20,6 +20,13 @@
 
 const CACHE = 'treinos-v2';
 
+/* Diz as paginas abertas que ha uma versao nova guardada e pronta a entrar. */
+function avisarQueHaVersaoNova() {
+  return self.clients.matchAll({ type: 'window' }).then((janelas) => {
+    janelas.forEach((j) => j.postMessage({ tipo: 'nova-versao' }));
+  });
+}
+
 const FICHEIROS = [
   './',
   'index.html',
@@ -72,9 +79,25 @@ self.addEventListener('fetch', (evento) => {
     evento.respondWith(
       caches.open(CACHE).then((cache) => {
         const doServidor = fetch(pedido).then((resposta) => {
-          if (resposta && resposta.ok) cache.put('index.html', resposta.clone());
+          if (!resposta || !resposta.ok) return resposta;
+
+          // Comparar com o que estava guardado. Se mudou, avisa-se a pagina
+          // que ja esta aberta — senao a versao nova so aparecia na abertura
+          // seguinte, e quem esta a usar a app nem sabia que havia uma.
+          const paraComparar = resposta.clone();
+          cache.match('index.html').then((antiga) => {
+            if (!antiga) return null;
+            return Promise.all([antiga.text(), paraComparar.text()])
+              .then(([velha, nova]) => { if (velha !== nova) avisarQueHaVersaoNova(); });
+          }).catch(() => { /* comparar e um extra, nunca pode partir nada */ });
+
+          cache.put('index.html', resposta.clone());
           return resposta;
         }).catch(() => null);
+
+        // waitUntil para o service worker nao ser morto antes de acabar de
+        // ir buscar e guardar a versao nova.
+        evento.waitUntil(doServidor);
 
         return cache.match('index.html').then((guardado) => {
           // Sem copia guardada (primeira abertura) espera-se pela rede.

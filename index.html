@@ -313,6 +313,19 @@ a{color:var(--azul)}
   color:var(--suave)}
 .selseg button.on{background:var(--sup3);color:var(--texto)}
 
+/* Barra de "ha versao nova". Fica por cima dos separadores, ao lado de onde
+   o cronometro aparece, e nunca tapa o que se esta a fazer. */
+#versaoNova{position:fixed;left:8px;right:8px;z-index:44;
+  bottom:calc(var(--barra) + var(--fundo-seg) + 8px);
+  background:var(--azul);color:#fff;border-radius:var(--raio);
+  padding:12px 14px;display:none;align-items:center;gap:10px;
+  box-shadow:0 8px 28px rgba(0,0,0,.5)}
+#versaoNova.on{display:flex}
+#versaoNova .t{flex:1;font-size:14.5px;font-weight:600;line-height:1.3}
+#versaoNova button{background:rgba(255,255,255,.22);border-radius:8px;
+  padding:9px 14px;font-size:14px;font-weight:700;color:#fff;flex:none}
+#versaoNova .fechar{background:none;padding:9px 4px;font-size:18px;opacity:.8}
+
 #aviso{position:fixed;left:16px;right:16px;bottom:calc(var(--barra) + var(--fundo-seg) + 74px);
   z-index:60;background:var(--sup3);border:1px solid var(--borda);border-radius:12px;
   padding:12px 16px;text-align:center;font-size:15px;font-weight:500;
@@ -381,6 +394,13 @@ a{color:var(--azul)}
     <button class="acao" id="folhaFechar" style="color:var(--azul)">Fechar</button>
   </div>
   <div class="corpo" id="folhaCorpo"></div>
+</div>
+
+<!-- Aparece quando o service worker já trouxe uma versão nova -->
+<div id="versaoNova">
+  <span class="t">Há uma versão nova pronta.</span>
+  <button id="versaoAtualizar">Atualizar</button>
+  <button class="fechar" id="versaoDepois" aria-label="agora não">&times;</button>
 </div>
 
 <div id="aviso"></div>
@@ -2236,6 +2256,14 @@ function ligarLinhasEditaveis() {
       this.classList.toggle('on', s.feita);
       linha.classList.toggle('porfazer', !s.feita);
       vibrar(s.feita ? 15 : 8);
+
+      // Dar o visto e o momento em que o descanso comeca. So no dia de hoje:
+      // rever o historico e ir dando vistos a series antigas nao pode pôr um
+      // cronometro a andar. Tirar o visto tambem nao mexe no cronometro — e
+      // uma correcao, nao o fim de uma serie.
+      if (s.feita && s.data === hojeIso()) {
+        Crono.arrancar(descansoDoExercicio(exercicioPorId(s.exercicioId)));
+      }
       // Ao dar por feita uma serie ela passa a contar para os recordes e para
       // o volume, por isso o ecra tem de ser refeito. Mas a posicao da lista
       // e guardada: confirmar quinze series a uma e a saltar para o topo de
@@ -4010,6 +4038,10 @@ function arrancar() {
   $('#cronoMais').onclick = function () { Crono.juntar(30); };
   $('#cronoParar').onclick = function () { Crono.parar(); };
 
+  // Versao nova
+  $('#versaoAtualizar').onclick = function () { location.reload(); };
+  $('#versaoDepois').onclick = function () { $('#versaoNova').classList.remove('on'); };
+
   return Armazenamento.verificar()
     .then(function () { return BD.abrir(); })
     .then(carregarTudo)
@@ -4032,6 +4064,17 @@ function arrancar() {
    Service worker: e ele que faz a app abrir sem rede
    ======================================================================== */
 if ('serviceWorker' in navigator) {
+  /* O service worker vai buscar a versao nova por tras enquanto a app abre
+     com a que ja tinha. Quando encontra uma diferente, avisa por aqui — sem
+     isso a versao nova so aparecia na abertura SEGUINTE, e quem estava a usar
+     a app nem sabia que havia uma. Nunca se recarrega sozinho: fazer isso a
+     meio de uma serie seria pior do que estar desactualizado. */
+  navigator.serviceWorker.addEventListener('message', function (e) {
+    if (!e.data || e.data.tipo !== 'nova-versao') return;
+    var barra = $('#versaoNova');
+    if (barra) barra.classList.add('on');
+  });
+
   window.addEventListener('load', function () {
     navigator.serviceWorker.register('sw.js').catch(function (erro) {
       // Falha o registo em file:// e em http sem ser localhost. A app continua
