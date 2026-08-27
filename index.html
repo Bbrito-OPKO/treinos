@@ -33,6 +33,9 @@
      chega: o traço ocupa uns 8px e continua a ter folga. */
   --fundo-barra:max(6px, calc(var(--fundo-seg) * 0.5));
   --barra:56px;
+  /* Sem isto o browser desenha os campos e os menus nativos
+     claros, e a letra do tema (que e clara) some-se neles. */
+  color-scheme:dark;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html{height:100%}
@@ -307,6 +310,36 @@ a{color:var(--azul)}
   border-bottom:1px solid var(--borda);flex:none}
 #folha .topo h2{font-size:18px;flex:1;min-width:0}
 #folha .corpo{overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 16px 20px}
+
+
+/* ---------------------------------------------------------------------------
+   6b. Campos de formulario (procurar, exercicio novo, objetivo, opcoes)
+   ------------------------------------------------------------------------ */
+/* Estas caixas nunca tiveram regra nenhuma. Sem ela o <label> ficava inline —
+   o rotulo colado a caixa, tudo empilhado sem folga — e o input ficava com o
+   fundo branco que o browser da por defeito, com a letra clara do tema por
+   cima: branco sobre branco. */
+.campo{display:block;margin-bottom:14px}
+.campo > span{display:block;font-size:11.5px;font-weight:700;color:var(--suave);
+  text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;line-height:1.3}
+.campo > input,.campo > select,.campo > textarea{
+  display:block;width:100%;min-height:46px;
+  background:var(--sup2);color:var(--texto);
+  border:1px solid var(--borda);border-radius:var(--raio-s);
+  padding:11px 12px;outline:none;
+  -webkit-appearance:none;appearance:none}
+.campo > textarea{min-height:0;resize:vertical;line-height:1.4}
+.campo > input::placeholder,.campo > textarea::placeholder{color:var(--fraco)}
+.campo > input:focus,.campo > select:focus,.campo > textarea:focus{
+  border-color:var(--azul)}
+/* O appearance:none tira a seta ao select — desenhamos uma. */
+.campo > select{padding-right:34px;background-repeat:no-repeat;
+  background-position:right 11px center;background-size:16px;
+  background-image:url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%238b98a9' stroke-width='1.8'%3E%3Cpath d='M4 6.5 8 10.5 12 6.5'/%3E%3C/svg%3E")}
+/* E o X do type=search vinha escuro sobre escuro. */
+.campo > input[type=search]::-webkit-search-cancel-button{
+  -webkit-appearance:none;width:18px;height:18px;background-size:18px;
+  background-repeat:no-repeat;background-image:url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%238b98a9' stroke-width='1.9'%3E%3Cpath d='M4 4l8 8M12 4l-8 8'/%3E%3C/svg%3E")}
 
 /* ---------------------------------------------------------------------------
    7. Graficos em SVG e calendario
