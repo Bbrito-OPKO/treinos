@@ -1782,19 +1782,33 @@ var Ecra = {
     return Estado.definicoes.ecraSempreLigado !== false;
   },
 
+  /* Um bloqueio ja largado conta como nao ter nenhum: o objeto continua ca
+     mas nao segura o ecra. Sem esta distincao, bastava o aviso de largado
+     nao chegar a tempo para nunca mais se pedir outro. */
+  ativo: function () {
+    return !!this.bloqueio && this.bloqueio.released !== true;
+  },
+
   pedir: function () {
-    if (!this.suportado || !this.querAtivo() || this.bloqueio) return Promise.resolve(false);
+    if (!this.suportado || !this.querAtivo() || this.ativo()) return Promise.resolve(false);
+    this.bloqueio = null;
     var eu = this;
-    return navigator.wakeLock.request('screen').then(function (b) {
-      eu.bloqueio = b;
-      b.addEventListener('release', function () { eu.bloqueio = null; });
-      return true;
-    }).catch(function () {
-      // O sistema pode recusar (bateria fraca, por exemplo). Nao ha nada a
-      // fazer e nao vale a pena chatear com um aviso.
+    try {
+      return Promise.resolve(navigator.wakeLock.request('screen')).then(function (b) {
+        eu.bloqueio = b;
+        b.addEventListener('release', function () { eu.bloqueio = null; });
+        return true;
+      }).catch(function () {
+        // O sistema pode recusar (bateria fraca, por exemplo). Nao ha nada a
+        // fazer e nao vale a pena chatear com um aviso.
+        eu.bloqueio = null;
+        return false;
+      });
+    } catch (e) {
+      // Browsers antigos podem rebentar em vez de recusar. A app segue.
       eu.bloqueio = null;
-      return false;
-    });
+      return Promise.resolve(false);
+    }
   },
 
   largar: function () {
@@ -1809,9 +1823,12 @@ var Ecra = {
   }
 };
 
-/* Quando a app volta a estar a vista, o bloqueio tem de ser pedido de novo. */
+/* O sistema larga o bloqueio sempre que a app sai de vista, e o aviso de que
+   o largou nem sempre chega. Por isso esquece-se o que la estava, e ao voltar
+   pede-se outro de raiz. */
 document.addEventListener('visibilitychange', function () {
-  if (!document.hidden) Ecra.pedir();
+  if (document.hidden) { Ecra.bloqueio = null; return; }
+  Ecra.pedir();
 });
 
 function hojeIso() {
@@ -2227,6 +2244,9 @@ var Crono = {
 
   arrancar: function (segundos) {
     if (!segundos || segundos <= 0) return;
+    // E entre series que o ecra se apagava: e o momento em que mais faz
+    // falta ter a certeza de que o bloqueio esta de pe.
+    Ecra.pedir();
     this.total = segundos;
     this.fim = Date.now() + segundos * 1000;
     this.jaAvisou = false;
@@ -2396,6 +2416,9 @@ function renderDia() {
   Array.prototype.forEach.call(document.querySelectorAll('[data-abrir-ex]'), function (b) {
     b.onclick = function () {
       Estado.exercicioAtivo = +b.dataset.abrirEx;
+      // Abrir um exercicio e comecar a treinar: pede-se aqui o bloqueio do
+      // ecra outra vez, caso o pedido da abertura da app tenha sido recusado.
+      Ecra.pedir();
       render();
     };
   });
@@ -2580,13 +2603,20 @@ function ligarLinhasEditaveis() {
       };
     });
 
-    var campoPeso = linha.querySelector('[data-campo="peso"]');
+    // Ao tocar num campo, selecciona tudo para escrever por cima sem apagar.
+    // O setTimeout e por causa do iOS: ele poe o cursor depois do focus e
+    // desfazia a seleccao se ela fosse feita ali mesmo.
+    function seleccionarAoTocar(el) {
+      el.onfocus = function () {
+        var alvo = this;
+        setTimeout(function () { alvo.select(); }, 0);
+      };
+    }
 
-    // Ao tocar no peso, selecciona tudo para escrever por cima sem apagar.
-    campoPeso.onfocus = function () {
-      var el = this;
-      setTimeout(function () { el.select(); }, 0);
-    };
+    var campoPeso = linha.querySelector('[data-campo="peso"]');
+    var campoReps = linha.querySelector('[data-campo="reps"]');
+    var campoRir = linha.querySelector('[data-campo="rir"]');
+    [campoPeso, campoReps, campoRir].forEach(seleccionarAoTocar);
 
     campoPeso.onchange = function () {
       var v = parseFloat(this.value);
@@ -2595,7 +2625,7 @@ function ligarLinhasEditaveis() {
       guardar(false);
     };
 
-    linha.querySelector('[data-campo="reps"]').onchange = function () {
+    campoReps.onchange = function () {
       var v = parseInt(this.value, 10);
       s.reps = Number.isFinite(v) && v > 0 ? v : null;
       this.value = s.reps === null ? '' : s.reps;
@@ -2603,7 +2633,7 @@ function ligarLinhasEditaveis() {
       actualizarMarca();
     };
 
-    linha.querySelector('[data-campo="rir"]').onchange = function () {
+    campoRir.onchange = function () {
       var t = this.value.trim();
       var v = parseFloat(t);
       s.rir = t === '' || !Number.isFinite(v) ? null : Math.max(0, Math.min(10, v));

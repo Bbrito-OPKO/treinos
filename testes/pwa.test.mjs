@@ -66,6 +66,20 @@ test('os campos das séries abrem o teclado numérico certo', () => {
     'o RIR é inteiro');
 });
 
+test('tocar no peso, nas reps ou no RIR selecciona o valor todo', () => {
+  // Sem isto, escrever num campo já preenchido junta-se ao que lá estava:
+  // um 8 em cima de um 10 dava 108 em vez de 8.
+  const ligar = html.match(/function ligarLinhasEditaveis\(\)([\s\S]*?)\n(?:\/\*|function )/);
+  assert.ok(ligar, 'não encontrei ligarLinhasEditaveis');
+  assert.match(ligar[1], /onfocus[\s\S]{0,160}setTimeout[\s\S]{0,80}\.select\(\)/,
+    'a selecção tem de ser feita fora do focus, senão o iOS desfaz-a');
+  const lista = ligar[1].match(/\[([^\]]*)\]\.forEach\(seleccionarAoTocar\)/);
+  assert.ok(lista, 'não encontrei a lista de campos que seleccionam ao toque');
+  for (const campo of ['campoPeso', 'campoReps', 'campoRir']) {
+    assert.ok(lista[1].includes(campo), 'o ' + campo + ' não selecciona ao toque');
+  }
+});
+
 test('os tres tipos de exercicio tem campos proprios', () => {
   // Sem isto, uma ida de bicicleta era tratada como peso e repetições.
   const m = html.match(/var CAMPOS_POR_TIPO = \{([\s\S]*?)\n\};/);
@@ -83,6 +97,12 @@ test('o ecrã só se mantém ligado pela via oficial', () => {
   // O bloqueio é largado pelo sistema quando a app sai de vista: sem voltar a
   // pedi-lo, o ecrã apagava-se para sempre a partir da primeira vez.
   assert.match(html, /visibilitychange[\s\S]{0,200}Ecra\.pedir\(\)/);
+  // Ao sair de vista esquece-se o bloqueio antigo. Guardá-lo fazia com que o
+  // pedido seguinte desistisse à porta, a segurar um objeto que já não segura
+  // nada — e o ecrã apagava-se a partir da primeira ida ao background.
+  assert.match(html, /if \(document\.hidden\) \{ Ecra\.bloqueio = null;/);
+  assert.match(html, /this\.bloqueio\.released !== true/,
+    'um bloqueio já largado tem de contar como não ter nenhum');
   assert.ok(!/<video/i.test(html), 'nada de vídeos escondidos para enganar o iOS');
 });
 
