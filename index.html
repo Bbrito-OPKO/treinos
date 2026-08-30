@@ -2580,7 +2580,15 @@ function ligarLinhasEditaveis() {
       };
     });
 
-    linha.querySelector('[data-campo="peso"]').onchange = function () {
+    var campoPeso = linha.querySelector('[data-campo="peso"]');
+
+    // Ao tocar no peso, selecciona tudo para escrever por cima sem apagar.
+    campoPeso.onfocus = function () {
+      var el = this;
+      setTimeout(function () { el.select(); }, 0);
+    };
+
+    campoPeso.onchange = function () {
       var v = parseFloat(this.value);
       s.peso = Number.isFinite(v) ? v : 0;
       this.value = s.peso;
