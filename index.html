@@ -299,10 +299,16 @@ a{color:var(--azul)}
 #veu{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;display:none;
   backdrop-filter:blur(3px)}
 #veu.on{display:block}
-#folha{position:fixed;left:0;right:0;bottom:0;z-index:51;
+/* O `bottom` sai do --teclado, que o JS poe a altura do teclado quando ele
+   abre. Sem isso a folha fica colada ao fundo do ECRA, o teclado sobe por cima
+   e leva o campo de procura com ele -- que era o que acontecia ao procurar um
+   exercicio. O `max-height` desconta o mesmo, senao a folha cresce para tras do
+   teclado e o topo sai por cima. */
+#folha{position:fixed;left:0;right:0;bottom:var(--teclado,0px);z-index:51;
   background:var(--fundo);border-radius:18px 18px 0 0;border-top:1px solid var(--borda);
-  max-height:88vh;display:none;flex-direction:column;
-  padding-bottom:var(--fundo-seg);transform:translateY(100%);transition:transform .24s ease}
+  max-height:calc(88vh - var(--teclado,0px));display:none;flex-direction:column;
+  padding-bottom:var(--fundo-seg);transform:translateY(100%);
+  transition:transform .24s ease, bottom .18s ease, max-height .18s ease}
 #folha.on{display:flex;transform:translateY(0)}
 #folha .puxador{width:38px;height:4.5px;background:var(--sup3);border-radius:99px;
   margin:9px auto 4px;flex:none}
@@ -1968,6 +1974,41 @@ function vibrar(padrao) {
 }
 
 /* --- Folha que sobe de baixo --- */
+/* --------------------------------------------------------------------------
+   O teclado do telemovel
+
+   Um teclado a abrir NAO encolhe o ecra: a folha continua colada ao fundo, e
+   o teclado sobe por cima dela. Quem estava a escrever no campo de procura
+   via-o desaparecer por baixo.
+
+   O visualViewport diz quanto do ecra e que esta mesmo visivel. A diferenca
+   para a janela toda e a altura do teclado, e e isso que o CSS recebe.
+
+   Ha telemoveis (e browsers antigos) sem visualViewport -- ai --teclado fica
+   a 0 e a folha comporta-se como antes, que era o que ja acontecia.
+   ----------------------------------------------------------------------- */
+(function acompanharTeclado() {
+  var vv = window.visualViewport;
+  if (!vv) return;
+  var pendente = false;
+  function medir() {
+    pendente = false;
+    // Arredonda: o iOS devolve fracoes de pixel e isso fazia a folha tremer.
+    var alturaTeclado = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+    // Abaixo de 100px nao e teclado -- e a barra do browser a esconder-se.
+    document.documentElement.style.setProperty(
+      '--teclado', (alturaTeclado > 100 ? alturaTeclado : 0) + 'px');
+  }
+  function agendar() {
+    if (pendente) return;
+    pendente = true;
+    requestAnimationFrame(medir);
+  }
+  vv.addEventListener('resize', agendar);
+  vv.addEventListener('scroll', agendar);
+  medir();
+})();
+
 function abrirFolha(titulo, html, aoAbrir) {
   $('#folhaTitulo').textContent = titulo;
   $('#folhaCorpo').innerHTML = html;
@@ -4386,6 +4427,14 @@ function renderExercicios() {
   // lembrar em que grupo o pôs.
   var proc = $('#exProc');
   if (proc) {
+    // Esta procura nao vive numa folha, vive na propria pagina -- por isso o
+    // --teclado nao lhe chega. Ao ganhar foco, pede ao browser para a trazer
+    // para dentro do que o teclado deixa ver.
+    proc.addEventListener('focus', function () {
+      setTimeout(function () {
+        proc.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }, 300); // o teclado leva ~250ms a subir; medir antes disso nao serve
+    });
     proc.oninput = function () {
       var termo = normalizarCabecalho(proc.value);
       var alvo = $('#exResultado'), grupos = $('#exGrupos');
