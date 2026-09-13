@@ -2110,13 +2110,22 @@ function gerarPlano(cfg) {
    exatamente no maximo novo. Os ajustes a mao eram de semanas concretas do
    ciclo anterior, por isso nao passam. Os pesos dos acessorios ficam — e a
    fase das adaptacoes que os vai buscar ao que foi registado. */
-function progredirConfig(cfg, novaDataInicio, hoje) {
+/* resultados (opcional, de resultadosMaximos): single feito -> sobe a partir
+   do melhor single; falhou ou sem teste -> fica. Sem resultados sobe tudo o
+   incremento. pausados: acessorios que saem deste ciclo. */
+function progredirConfig(cfg, novaDataInicio, hoje, resultados, pausados) {
   var novo = _copia(cfg);
   novo.dataInicio = novaDataInicio;
   novo.criado = hoje;
   novo.ajustes = {};
+  if (pausados && pausados.length) {
+    novo.acc = novo.acc.filter(function (a) { return pausados.indexOf(a[0]) === -1; });
+  }
   novo.lifts.forEach(function (L) {
     var l = novo.lift[L], antes = l.max, depois = antes + l.inc;
+    var r = resultados && resultados[L];
+    if (r && r.estado === 'sucesso') depois = Math.max(antes, r.melhor) + l.inc;
+    else if (r) depois = antes;
     ['maximos', 'volume_5', 'volume_8', 'leve'].forEach(function (m) {
       l[m] = l[m].map(function (s) {
         return [arredondarPy(s[0] * depois / antes / 2.5) * 2.5, s[1]];
@@ -2398,6 +2407,383 @@ function planoParaSessoes(plano, exercicios, sessoesExistentes, proxIds) {
     });
   });
   return { sessoes: sessoes, series: series, choques: choques, emFalta: [] };
+}
+
+/* ===========================================================================
+   Adaptacao: o plano a olhar para o que foi feito
+
+   Nada disto muda o plano sozinho. Cada funcao devolve SUGESTOES, cada uma
+   com o numero que a justifica; o ecra mostra-as com Aceitar e Ignorar.
+   Regras combinadas com o Bruno a 13/09/2026:
+
+   - Faltar a segunda (maximos) ou a quinta (pesado) empurra o plano uma
+     semana. Faltar a terca ou a sexta segue. So se sugere empurrar quando nao
+     houve treino do plano DEPOIS do dia falhado: se ja continuou, empurrar
+     baralhava o que ja fez.
+   - A carga dos acessorios sai do que ele fez: kg, reps e RIR (quando ha).
+     Quem faz exatamente o plano fica com a mesma carga.
+   - Os maximos: se o single saiu, o ciclo seguinte sobe a partir do melhor
+     single; se falhou (ou nao se fez), nao sobe.
+   - Tres sessoes do plano sem progresso num acessorio: sugere tira-lo do
+     ciclo seguinte.
+   - Uma semana com muitas series aquem das reps: sugere a seguinte a -10%.
+   ======================================================================== */
+
+var DIAS_QUE_EMPURRAM = ['segunda', 'quinta'];
+
+/* Liga cada dia do plano a sessao da app que o representa. A sessao guarda
+   a identidade em s.plano ({ ciclo, semana, dia }) — e o que a deixa mudar
+   de data sem se perder. As do ciclo 1 entraram pelo para_app.py sem ela e
+   reconhecem-se pela data e pela nota "Semana N - modo". */
+function mapaDoPlano(ciclos, sessoes) {
+  var porData = {}, porIdentidade = {};
+  sessoes.forEach(function (s) {
+    if (s.plano) porIdentidade[s.plano.ciclo + '|' + s.plano.semana + '|' + s.plano.dia] = s;
+    else (porData[s.data] = porData[s.data] || []).push(s);
+  });
+  return ciclos.map(function (rec, i) {
+    var plano = gerarPlano(rec.cfg);
+    var dias = [];
+    plano.calendario.forEach(function (sem) {
+      PLANO_DIAS.forEach(function (d) {
+        var dia = sem.dias[d];
+        var sessao = porIdentidade[rec.dataInicio + '|' + sem.semana + '|' + d] || null;
+        if (!sessao) {
+          var nota = 'Semana ' + sem.semana + ' - ' + dia.modo;
+          sessao = (porData[dia.data] || []).filter(function (s) { return s.notas === nota; })[0] || null;
+        }
+        dias.push({ ciclo: rec.dataInicio, indiceCiclo: i, semana: sem.semana, dia: d,
+          dataPlano: dia.data, data: sessao ? sessao.data : dia.data,
+          lift: dia.lift, modo: dia.modo, exercicios: dia.exercicios, sessao: sessao });
+      });
+    });
+    return { rec: rec, plano: plano, dias: dias };
+  });
+}
+
+function _seriesPorSessao(series) {
+  var m = {};
+  series.forEach(function (s) { (m[s.sessaoId] = m[s.sessaoId] || []).push(s); });
+  return m;
+}
+
+function _diasDoMapa(mapa) {
+  var todos = [];
+  mapa.forEach(function (c) { todos = todos.concat(c.dias); });
+  return todos.sort(function (a, b) { return a.data < b.data ? -1 : a.data > b.data ? 1 : 0; });
+}
+
+function _feitasDoDia(dia, porSessao) {
+  if (!dia.sessao) return { total: 0, feitas: 0 };
+  var ss = porSessao[dia.sessao.id] || [];
+  return { total: ss.length, feitas: ss.filter(serieFeita).length };
+}
+
+/* --- Empurrar ------------------------------------------------------------ */
+
+function sugerirEmpurrar(mapa, series, hoje) {
+  var porSessao = _seriesPorSessao(series);
+  var dias = _diasDoMapa(mapa);
+  var ultimoFeito = -1;
+  dias.forEach(function (d, i) { if (_feitasDoDia(d, porSessao).feitas > 0) ultimoFeito = i; });
+  for (var i = ultimoFeito + 1; i < dias.length; i++) {
+    var d = dias[i];
+    if (d.data >= hoje) break;
+    if (!d.sessao || DIAS_QUE_EMPURRAM.indexOf(d.dia) === -1) continue;
+    var afetados = dias.slice(i).filter(function (x) { return x.sessao; }).length;
+    return {
+      tipo: 'empurrar',
+      chave: 'empurrar|' + d.ciclo + '|' + d.semana + '|' + d.dia,
+      titulo: 'Empurrar o plano uma semana',
+      detalhe: 'Faltou ' + d.dia + ' ' + d.data.slice(8) + '/' + d.data.slice(5, 7) +
+        ' (' + NOME_MODO_PLANO[d.modo] + '). ' + afetados + ' treinos passam 7 dias para a frente.',
+      desde: d.data
+    };
+  }
+  return null;
+}
+
+var NOME_MODO_PLANO = { maximos: 'máximos', volume_8: 'médio', volume_5: 'pesado', leve: 'leve' };
+
+/* Muda 7 dias todas as sessoes do plano, a partir de `desde`, que ainda nao
+   tem nenhuma serie feita. Devolve so as copias alteradas. Se uma data de
+   destino ja tem outro treino, nao muda nada e diz qual. */
+function aplicarEmpurrar(mapa, sessoes, series, desde) {
+  var porSessao = _seriesPorSessao(series);
+  var mover = _diasDoMapa(mapa).filter(function (d) {
+    return d.sessao && d.data >= desde && _feitasDoDia(d, porSessao).feitas === 0;
+  });
+  var ids = {};
+  mover.forEach(function (d) { ids[d.sessao.id] = 1; });
+  var ocupadas = {};
+  sessoes.forEach(function (s) { if (!ids[s.id]) ocupadas[s.data] = 1; });
+  var conflitos = [];
+  var novasSessoes = mover.map(function (d) {
+    var nova = _copia(d.sessao);
+    nova.data = _somarDias(d.sessao.data, 7);
+    nova.plano = { ciclo: d.ciclo, semana: d.semana, dia: d.dia };
+    if (ocupadas[nova.data]) conflitos.push(nova.data);
+    return nova;
+  });
+  if (conflitos.length) return { sessoes: [], series: [], conflitos: conflitos };
+  var novasSeries = [];
+  mover.forEach(function (d) {
+    (porSessao[d.sessao.id] || []).forEach(function (s) {
+      var n = _copia(s);
+      n.data = _somarDias(s.data, 7);
+      novasSeries.push(n);
+    });
+  });
+  return { sessoes: novasSessoes, series: novasSeries, conflitos: [] };
+}
+
+/* --- Carga dos acessorios ------------------------------------------------ */
+
+function _passoKg(kg) { return kg < 60 ? 2.5 : 5; }
+
+/* A carga de catalogo (a media das duas series) que o que foi feito aguenta.
+   Cada serie feita da uma estimativa de 1RM com as reps que ainda havia no
+   tanque (RIR). Sem RIR: se chegou as reps do plano conta-se RIR 2, que e o
+   que o plano pressupoe; se nao chegou, RIR 0. Depois pergunta-se que carga
+   faz a segunda serie do plano (a mais pesada, 1,05 x) com RIR 2. */
+function cargaDoFeito(alvo, feitas, dia) {
+  var melhor = null;
+  feitas.forEach(function (s, i) {
+    if (!(s.peso > 0) || !(s.reps >= 1)) return;
+    var alvoReps = alvo[Math.min(i, alvo.length - 1)][1];
+    var rir = Number.isFinite(s.rir) ? s.rir : (s.reps >= alvoReps ? 2 : 0);
+    var e1 = s.peso * (1 + (s.reps + rir) / 30);
+    if (melhor === null || e1 > melhor) melhor = e1;
+  });
+  if (melhor === null) return null;
+  var baixas = alvo[alvo.length - 1][1];
+  var fator = dia === 'sexta' ? 0.88 : 1;
+  var kg = melhor / (1 + (baixas + 2) / 30) / 1.05 / fator;
+  return arredondarPy(kg / 2.5) * 2.5;
+}
+
+function sugerirCargas(mapa, series, exercicios, hoje) {
+  var porSessao = _seriesPorSessao(series);
+  var idPorNome = {};
+  exercicios.forEach(function (e) { idPorNome[e.nome] = e.id; });
+  var ultimo = {};   // nome -> { dia, alvo, feitas }
+  _diasDoMapa(mapa).forEach(function (d) {
+    if (!d.sessao || d.data >= hoje) return;
+    d.exercicios.forEach(function (e) {
+      if (e.foco || e.categoria === 'abs') return;
+      var id = idPorNome[e.nome];
+      var feitas = (porSessao[d.sessao.id] || []).filter(function (s) {
+        return s.exercicioId === id && serieFeita(s);
+      }).sort(function (a, b) { return a.ordem - b.ordem; });
+      if (feitas.length) ultimo[e.nome] = { dia: d, alvo: e.series, feitas: feitas };
+    });
+  });
+  var cfgAtual = mapa[mapa.length - 1].rec.cfg;
+  var sug = [];
+  Object.keys(ultimo).forEach(function (nome) {
+    var u = ultimo[nome];
+    var acc = cfgAtual.acc.filter(function (a) { return a[0] === nome; })[0];
+    if (!acc || !acc[2]) return;
+    var feito = cargaDoFeito(u.alvo, u.feitas, u.dia.dia);
+    // O que a mesma conta da com o plano feito tal e qual. O arredondamento
+    // das series do plano (a 2,5 ou 5) desvia a conta um passo para cima ou
+    // para baixo; comparar com isto, e nao com o catalogo, e o que faz quem
+    // cumpriu o plano ficar com a mesma carga.
+    var neutro = cargaDoFeito(u.alvo, u.alvo.map(function (s) { return { peso: s[0], reps: s[1], rir: null }; }), u.dia.dia);
+    if (feito === null || neutro === null) return;
+    var antes = acc[2];
+    var novo = Math.max(2.5, antes + (feito - neutro));
+    if (Math.abs(novo - antes) < _passoKg(Math.min(novo, antes))) return;
+    sug.push({
+      tipo: 'carga',
+      chave: 'carga|' + nome + '|' + u.dia.data,
+      titulo: nome + ': ' + num_(antes) + ' → ' + num_(novo) + ' kg',
+      detalhe: 'A ' + u.dia.data.slice(8) + '/' + u.dia.data.slice(5, 7) + ' fizeste ' +
+        u.feitas.map(function (s) { return num_(s.peso) + '×' + s.reps + (Number.isFinite(s.rir) ? ' RIR ' + s.rir : ''); }).join(', ') +
+        ' (plano: ' + u.alvo.map(function (s) { return num_(s[0]) + '×' + s[1]; }).join(', ') + ').',
+      nome: nome, antes: antes, novo: novo
+    });
+  });
+  return sug;
+}
+
+/* Numero curto para textos do nucleo (sem depender do toLocaleString da UI). */
+function num_(v) { return String(Math.round(v * 10) / 10).replace('.', ','); }
+
+/* Escreve a carga nova no catalogo de todos os ciclos e refaz as series
+   ainda por fazer desse exercicio, de hoje em diante. */
+function aplicarCarga(mapa, series, exercicios, nome, novoKg, hoje) {
+  var id = (exercicios.filter(function (e) { return e.nome === nome; })[0] || {}).id;
+  var porSessao = _seriesPorSessao(series);
+  var ciclos = mapa.map(function (c) {
+    var rec = _copia(c.rec);
+    rec.cfg.acc.forEach(function (a) { if (a[0] === nome) a[2] = novoKg; });
+    return rec;
+  });
+  var alteradas = [];
+  mapa.forEach(function (c, i) {
+    var prep = _prepararConfig(ciclos[i].cfg);
+    c.dias.forEach(function (d) {
+      if (!d.sessao || d.data < hoje || !prep.ACC[nome]) return;
+      if (!d.exercicios.some(function (e) { return e.nome === nome; })) return;
+      var alvo = seriesAcessorio(prep, nome, d.dia);
+      var doEx = (porSessao[d.sessao.id] || []).filter(function (s) { return s.exercicioId === id; })
+        .sort(function (a, b) { return a.ordem - b.ordem; });
+      doEx.forEach(function (s, k) {
+        if (serieFeita(s) || !alvo[k]) return;
+        var n = _copia(s);
+        n.peso = alvo[k][0];
+        n.reps = alvo[k][1];
+        alteradas.push(n);
+      });
+    });
+  });
+  return { ciclos: ciclos, series: alteradas };
+}
+
+/* --- Maximos ------------------------------------------------------------- */
+
+/* Para cada lift, o resultado do dia de maximos mais recente que ja passou. */
+function resultadosMaximos(mapa, series, exercicios, hoje) {
+  var porSessao = _seriesPorSessao(series);
+  var idPorNome = {};
+  exercicios.forEach(function (e) { idPorNome[e.nome] = e.id; });
+  var res = {};
+  _diasDoMapa(mapa).forEach(function (d) {
+    if (d.modo !== 'maximos' || d.data >= hoje) return;
+    var foco = d.exercicios[0];
+    var topo = foco.series[2][0];
+    var id = idPorNome[PLANO_NOME_NA_APP[foco.nome] || foco.nome];
+    var feitas = d.sessao ? (porSessao[d.sessao.id] || []).filter(function (s) {
+      return s.exercicioId === id && serieFeita(s) && s.reps >= 1;
+    }) : [];
+    var melhor = feitas.reduce(function (m, s) { return Math.max(m, s.peso); }, 0);
+    res[d.lift] = {
+      data: d.data, topo: topo, melhor: feitas.length ? melhor : null,
+      estado: !feitas.length ? 'sem-teste' : melhor >= topo ? 'sucesso' : 'falhou'
+    };
+  });
+  return res;
+}
+
+/* --- Estagnacao ---------------------------------------------------------- */
+
+function sugerirEstagnacao(mapa, series, exercicios, hoje) {
+  var porSessao = _seriesPorSessao(series);
+  var idPorNome = {};
+  exercicios.forEach(function (e) { idPorNome[e.nome] = e.id; });
+  var historico = {};   // nome -> [{ data, e1 }]
+  _diasDoMapa(mapa).forEach(function (d) {
+    if (!d.sessao || d.data >= hoje) return;
+    d.exercicios.forEach(function (e) {
+      if (e.foco || e.categoria === 'abs') return;
+      var id = idPorNome[e.nome];
+      var e1 = (porSessao[d.sessao.id] || []).reduce(function (m, s) {
+        if (s.exercicioId !== id || !serieFeita(s) || !(s.peso > 0) || !(s.reps >= 1)) return m;
+        return Math.max(m, s.peso * (1 + s.reps / 30));
+      }, 0);
+      if (e1 > 0) (historico[e.nome] = historico[e.nome] || []).push({ data: d.data, e1: e1 });
+    });
+  });
+  var sug = [];
+  Object.keys(historico).forEach(function (nome) {
+    var h = historico[nome];
+    if (h.length < 4) return;
+    var ult = h.slice(-4);
+    var depois = Math.max(ult[1].e1, ult[2].e1, ult[3].e1);
+    if (depois > ult[0].e1) return;
+    sug.push({
+      tipo: 'estagnado',
+      chave: 'estagnado|' + nome + '|' + ult[3].data,
+      titulo: 'Tirar ' + nome + ' do ciclo seguinte',
+      detalhe: '3 sessões seguidas sem passar o que fizeste a ' + ult[0].data.slice(8) + '/' +
+        ult[0].data.slice(5, 7) + '. O gerador escolhe outro do mesmo grupo.',
+      nome: nome
+    });
+  });
+  return sug;
+}
+
+/* --- Descarga ------------------------------------------------------------ */
+
+function sugerirDescarga(mapa, series, exercicios, hoje) {
+  var porSessao = _seriesPorSessao(series);
+  var idPorNome = {};
+  exercicios.forEach(function (e) { idPorNome[e.nome] = e.id; });
+  var dias = _diasDoMapa(mapa);
+  // a semana do plano mais recente que ja acabou toda
+  var semanas = {};
+  dias.forEach(function (d) {
+    var k = d.ciclo + '|' + d.semana;
+    (semanas[k] = semanas[k] || []).push(d);
+  });
+  var fechada = null;
+  Object.keys(semanas).forEach(function (k) {
+    var ds = semanas[k];
+    if (ds.every(function (d) { return d.data < hoje; }) &&
+        ds.filter(function (d) { return _feitasDoDia(d, porSessao).feitas > 0; }).length >= 3) {
+      if (!fechada || ds[ds.length - 1].data > fechada[fechada.length - 1].data) fechada = ds;
+    }
+  });
+  if (!fechada) return null;
+  var comparadas = 0, aquem = 0, rirZero = 0;
+  fechada.forEach(function (d) {
+    if (!d.sessao) return;
+    d.exercicios.forEach(function (e) {
+      var id = idPorNome[PLANO_NOME_NA_APP[e.nome] || e.nome];
+      var feitas = (porSessao[d.sessao.id] || []).filter(function (s) {
+        return s.exercicioId === id && serieFeita(s);
+      }).sort(function (a, b) { return a.ordem - b.ordem; });
+      feitas.forEach(function (s, i) {
+        var alvo = e.series[i];
+        if (!alvo || e.categoria === 'abs') return;
+        var topoMaximos = e.foco && e.modo === 'maximos' && i === 2;
+        comparadas++;
+        if (!topoMaximos && s.peso >= alvo[0] * 0.95 && s.reps < alvo[1] - 1) aquem++;
+        if (!topoMaximos && s.rir === 0) rirZero++;
+      });
+    });
+  });
+  if (comparadas < 10 || (aquem / comparadas < 0.3 && rirZero < 4)) return null;
+  var fim = fechada[fechada.length - 1].data;
+  return {
+    tipo: 'descarga',
+    chave: 'descarga|' + fechada[0].ciclo + '|' + fechada[0].semana,
+    titulo: 'Semana seguinte mais leve (-10%)',
+    detalhe: 'Na semana ' + fechada[0].semana + ', ' + aquem + ' de ' + comparadas +
+      ' séries ficaram 2+ reps aquém do plano e ' + rirZero + ' foram a RIR 0.',
+    depoisDe: fim
+  };
+}
+
+function aplicarDescarga(mapa, series, depoisDe) {
+  var porSessao = _seriesPorSessao(series);
+  var ate = _somarDias(depoisDe, 8);
+  var alteradas = [];
+  _diasDoMapa(mapa).forEach(function (d) {
+    if (!d.sessao || d.data <= depoisDe || d.data > ate) return;
+    (porSessao[d.sessao.id] || []).forEach(function (s) {
+      if (serieFeita(s) || !(s.peso > 0)) return;
+      var n = _copia(s);
+      n.peso = arredondarPy(s.peso * 0.9 / 2.5) * 2.5;
+      alteradas.push(n);
+    });
+  });
+  return alteradas;
+}
+
+/* --- Tudo junto ---------------------------------------------------------- */
+
+function calcularSugestoes(ciclos, sessoes, series, exercicios, hoje, decididas) {
+  var mapa = mapaDoPlano(ciclos, sessoes);
+  var todas = [];
+  var e = sugerirEmpurrar(mapa, series, hoje);
+  if (e) todas.push(e);
+  var d = sugerirDescarga(mapa, series, exercicios, hoje);
+  if (d) todas.push(d);
+  todas = todas.concat(sugerirCargas(mapa, series, exercicios, hoje))
+    .concat(sugerirEstagnacao(mapa, series, exercicios, hoje));
+  return todas.filter(function (s) { return !decididas[s.chave]; });
 }
 
 /* ---------------------------------------------------------------------------
