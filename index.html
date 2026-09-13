@@ -3725,6 +3725,11 @@ function renderDia() {
   mostrarNavDia(data);
 
   var html = Armazenamento.aviso();
+  var nSug = sugestoesAbertas().length;
+  if (nSug) {
+    html += '<button class="btn larga fina" id="btSugestoes" style="margin-bottom:12px;color:var(--azul)">' +
+      plural(nSug, 'sugestão', 'sugestões') + ' para o plano &#8250;</button>';
+  }
 
   if (!series.length) {
     html += '<div class="vazio">' +
@@ -3808,6 +3813,7 @@ function renderDia() {
 
   $('#v-treino').innerHTML = html;
 
+  if ($('#btSugestoes')) $('#btSugestoes').onclick = function () { trocarVista('plano'); };
   $('#btAddEx').onclick = function () { escolherExercicio(); };
   var copiar = $('#btCopiar');
   if (copiar) copiar.onclick = escolherTreinoParaCopiar;
@@ -6501,16 +6507,102 @@ function ciclosDoPlano() {
   return [{ dataInicio: PLANO_CONFIG_PADRAO.dataInicio, cfg: PLANO_CONFIG_PADRAO, gravado: null }];
 }
 
-function cicloAtual() {
-  var ciclos = ciclosDoPlano(), hoje = hojeIso(), atual = ciclos[0];
-  ciclos.forEach(function (c) { if (c.dataInicio <= hoje) atual = c; });
-  return { ciclo: atual, numero: ciclos.indexOf(atual) + 1, total: ciclos.length };
+/* O ciclo em que se esta: o ultimo cujo primeiro treino (na data real, depois
+   de empurroes) ja chegou. */
+function cicloAtual(mapa) {
+  var hoje = hojeIso(), i = 0;
+  mapa.forEach(function (c, k) {
+    var primeiro = c.dias.map(function (d) { return d.data; }).sort()[0];
+    if (primeiro <= hoje) i = k;
+  });
+  return { ciclo: mapa[i].rec, mapa: mapa[i], numero: i + 1, total: mapa.length };
 }
 
-/* Quantas series do dia estao feitas e quantas ha. */
-function estadoDoDia(data) {
-  var doDia = Estado.series.filter(function (s) { return s.data === data; });
-  return { total: doDia.length, feitas: doDia.filter(serieFeita).length };
+/* Quantas series da sessao estao feitas e quantas ha. */
+function estadoDaSessao(sessao) {
+  if (!sessao) return { total: 0, feitas: 0 };
+  var ss = Estado.series.filter(function (s) { return s.sessaoId === sessao.id; });
+  return { total: ss.length, feitas: ss.filter(serieFeita).length };
+}
+
+/* --- Sugestoes: calcula-se tudo de novo a cada ecra; so as decisoes (aceite
+   ou ignorada) ficam guardadas, na loja sugestoes, pela chave. --- */
+function sugestoesAbertas() {
+  var decididas = {};
+  Estado.sugestoes.forEach(function (s) { decididas[s.chave] = 1; });
+  try {
+    return calcularSugestoes(ciclosDoPlano(), Estado.sessoes, Estado.series, Estado.exercicios,
+      hojeIso(), decididas);
+  } catch (e) {
+    console.warn('Sugestões:', e.message);
+    return [];
+  }
+}
+
+function decidirSugestao(sug, estado) {
+  var reg = { chave: sug.chave, tipo: sug.tipo, estado: estado, data: hojeIso(), titulo: sug.titulo };
+  return BD.guardar('sugestoes', reg).then(function (id) {
+    reg.id = id;
+    Estado.sugestoes.push(reg);
+  });
+}
+
+/* Substitui em Estado os registos com o mesmo id e grava-os. */
+function gravarAlterados(loja, alterados) {
+  if (!alterados.length) return Promise.resolve();
+  var porId = {};
+  alterados.forEach(function (r) { porId[r.id] = r; });
+  Estado[loja] = Estado[loja].map(function (r) { return porId[r.id] || r; });
+  return BD.guardarMuitos(loja, alterados);
+}
+
+function aceitarSugestao(sug) {
+  var hoje = hojeIso();
+  var ciclos = ciclosDoPlano();
+  var mapa = mapaDoPlano(ciclos, Estado.sessoes);
+  var passo;
+  if (sug.tipo === 'empurrar') {
+    var r = aplicarEmpurrar(mapa, Estado.sessoes, Estado.series, sug.desde);
+    if (r.conflitos.length) {
+      avisar('Não empurrei: ' + r.conflitos.map(dataCurta).join(', ') + ' já tem outro treino.');
+      return;
+    }
+    passo = gravarAlterados('sessoes', r.sessoes).then(function () { return gravarAlterados('series', r.series); })
+      .then(function () { return r.sessoes.length + ' treinos passaram uma semana para a frente'; });
+  } else if (sug.tipo === 'carga') {
+    var c = aplicarCarga(mapa, Estado.series, Estado.exercicios, sug.nome, sug.novo, hoje);
+    passo = gravarAlterados('series', c.series).then(function () { return guardarDefinicao('planoCiclos', c.ciclos); })
+      .then(function () { return sug.nome + ' a ' + num(sug.novo) + ' kg (' + c.series.length + ' séries por fazer mudadas)'; });
+  } else if (sug.tipo === 'descarga') {
+    var alt = aplicarDescarga(mapa, Estado.series, sug.depoisDe);
+    passo = gravarAlterados('series', alt).then(function () { return alt.length + ' séries da semana seguinte a -10%'; });
+  } else if (sug.tipo === 'estagnado') {
+    var pausados = (Estado.definicoes.planoPausados || []).concat([sug.nome]);
+    passo = guardarDefinicao('planoPausados', pausados).then(function () { return sug.nome + ' sai no ciclo seguinte'; });
+  } else {
+    return;
+  }
+  passo.then(function (msg) {
+    return decidirSugestao(sug, 'aceite').then(function () {
+      reindexar();
+      avisar(msg);
+      render();
+    });
+  }).catch(function (e) { avisar('Não gravou: ' + e.message); });
+}
+
+function htmlSugestoes(lista) {
+  if (!lista.length) return '';
+  return '<div class="lista"><div class="cab">' + plural(lista.length, 'sugestão', 'sugestões') + '</div>' +
+    lista.map(function (s, i) {
+      return '<div class="item" style="display:block">' +
+        '<div style="font-weight:600">' + esc(s.titulo) + '</div>' +
+        '<div class="mini fraco" style="margin:3px 0 10px">' + esc(s.detalhe) + '</div>' +
+        '<div class="linha" style="gap:8px">' +
+          '<button class="btn primaria fina crescer" data-sugaceitar="' + i + '">Aceitar</button>' +
+          '<button class="btn fina crescer" data-sugignorar="' + i + '">Ignorar</button>' +
+        '</div></div>';
+    }).join('') + '</div>';
 }
 
 function renderPlano() {
@@ -6518,15 +6610,19 @@ function renderPlano() {
   $('#btVoltar').hidden = true;
   $('#btAcao').hidden = true;
 
-  var ca = cicloAtual();
-  var plano = gerarPlano(ca.ciclo.cfg);
+  var mapa = mapaDoPlano(ciclosDoPlano(), Estado.sessoes);
+  var ca = cicloAtual(mapa);
+  var plano = ca.mapa.plano;
   var cal = plano.calendario;
-  var ultimo = cal[3].dias.sexta.data;
+  var datasReais = ca.mapa.dias.map(function (d) { return d.data; }).sort();
   var hoje = hojeIso();
+  var sugestoes = sugestoesAbertas();
 
-  var html = '<div class="cartao" style="margin-top:0"><div class="linha entre">' +
+  var html = htmlSugestoes(sugestoes) +
+    '<div class="cartao" style="margin-top:0"><div class="linha entre">' +
     '<div><div style="font-size:20px;font-weight:700">Ciclo ' + ca.numero + '</div>' +
-    '<div class="mini fraco">' + esc(dataCurta(cal[0].inicio)) + ' a ' + esc(dataCurta(ultimo)) + '</div></div>' +
+    '<div class="mini fraco">' + esc(dataCurta(datasReais[0])) + ' a ' +
+      esc(dataCurta(datasReais[datasReais.length - 1])) + '</div></div>' +
     '<button class="btn primaria fina" id="plSeguinte">Ciclo seguinte</button></div>' +
     '<div class="linha" style="gap:8px;flex-wrap:wrap;margin-top:12px">' +
     ca.ciclo.cfg.lifts.map(function (L) {
@@ -6538,8 +6634,9 @@ function renderPlano() {
     html += '<div class="lista"><div class="cab">Semana ' + sem.semana + ' · máximos: ' +
       esc(ca.ciclo.cfg.nomeLift[sem.maximos].toLowerCase()) + '</div>';
     PLANO_DIAS.forEach(function (d) {
-      var dia = sem.dias[d];
-      var est = estadoDoDia(dia.data);
+      var real = ca.mapa.dias.filter(function (x) { return x.semana === sem.semana && x.dia === d; })[0];
+      var dia = { data: real.data, lift: real.lift, modo: real.modo, exercicios: real.exercicios };
+      var est = estadoDaSessao(real.sessao);
       var marca;
       if (est.total && est.feitas === est.total) marca = '<span class="etiqueta" style="color:var(--verde)">feito</span>';
       else if (est.feitas) marca = '<span class="etiqueta">' + est.feitas + '/' + est.total + '</span>';
@@ -6559,13 +6656,21 @@ function renderPlano() {
   });
 
   if (ca.numero < ca.total) {
-    var prox = ciclosDoPlano()[ca.numero];
+    var primeiroProx = mapa[ca.numero].dias.map(function (d) { return d.data; }).sort()[0];
     html += '<p class="mini fraco">O ciclo ' + (ca.numero + 1) + ' já está gravado e começa a ' +
-      esc(dataLonga(prox.dataInicio)) + '.</p>';
+      esc(dataLonga(primeiroProx)) + '.</p>';
   }
 
   $('#v-plano').innerHTML = html;
   $('#plSeguinte').onclick = prepararCicloSeguinte;
+  Array.prototype.forEach.call(document.querySelectorAll('[data-sugaceitar]'), function (b) {
+    b.onclick = function () { b.disabled = true; aceitarSugestao(sugestoes[+b.dataset.sugaceitar]); };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-sugignorar]'), function (b) {
+    b.onclick = function () {
+      decidirSugestao(sugestoes[+b.dataset.sugignorar], 'ignorada').then(render);
+    };
+  });
   Array.prototype.forEach.call(document.querySelectorAll('[data-pldia]'), function (b) {
     b.onclick = function () {
       Estado.dataAtual = b.dataset.pldia;
@@ -6579,8 +6684,19 @@ function renderPlano() {
 function prepararCicloSeguinte() {
   var ciclos = ciclosDoPlano();
   var ultimo = ciclos[ciclos.length - 1];
-  var cfg = progredirConfig(ultimo.cfg, _somarDias(ultimo.dataInicio, 28), hojeIso());
+  var mapa = mapaDoPlano(ciclos, Estado.sessoes);
+  // a segunda a seguir ao ultimo treino do ultimo ciclo (conta os empurroes)
+  var ultimaData = mapa[mapa.length - 1].dias.map(function (d) { return d.data; }).sort().pop();
+  var resultados = resultadosMaximos(mapa, Estado.series, Estado.exercicios, hojeIso());
+  var pausados = Estado.definicoes.planoPausados || [];
+  var cfg = progredirConfig(ultimo.cfg, _somarDias(segundaDaSemana(ultimaData), 7), hojeIso(),
+    resultados, pausados);
   var aberto = null;   // 'semana|dia' expandido na lista
+  var PORQUE = {
+    sucesso: function (r) { return 'single de ' + num(r.melhor) + ' feito a ' + dataCurta(r.data); },
+    falhou: function (r) { return 'falhou: ' + num(r.melhor) + ' de ' + num(r.topo) + ' a ' + dataCurta(r.data) + ', não sobe'; },
+    'sem-teste': function (r) { return 'máximos de ' + dataCurta(r.data) + ' não feitos, não sobe'; }
+  };
 
   function desenhar(corpo) {
     var plano, erro = null, falhas = [];
@@ -6591,10 +6707,14 @@ function prepararCicloSeguinte() {
       '<input id="csData" type="date" value="' + cfg.dataInicio + '"></label>' +
       '<div class="cartao" style="margin-top:0"><h3>Máximos deste ciclo</h3>' +
       cfg.lifts.map(function (L) {
-        return '<div class="linha entre pequeno" style="padding:3px 0"><span>' + esc(cfg.nomeLift[L]) +
+        var r = resultados[L];
+        return '<div style="padding:4px 0"><div class="linha entre pequeno"><span>' + esc(cfg.nomeLift[L]) +
           '</span><span class="nums">' + num(ultimo.cfg.lift[L].max) + ' → <b>' + num(cfg.lift[L].max) +
-          '</b> kg</span></div>';
-      }).join('') + '</div>';
+          '</b> kg</span></div>' +
+          '<div class="mini fraco">' + esc(r ? PORQUE[r.estado](r) : 'máximos ainda por fazer neste ciclo: se gravares já, sobe o incremento') + '</div></div>';
+      }).join('') + '</div>' +
+      (pausados.length ? '<p class="mini" style="color:var(--ambar);margin:-4px 0 12px">Fora deste ciclo: ' +
+        pausados.map(esc).join(', ') + '</p>' : '');
 
     if (erro) {
       html += '<p style="color:var(--vermelho)">Não consegui gerar: ' + esc(erro) + '</p>';
@@ -6682,11 +6802,21 @@ function gravarCiclo(cfg, plano) {
     avisar('Faltam exercícios na app: ' + r.emFalta.join(', ') + '. Nada foi gravado.');
     return;
   }
+  // Identidade na sessao desde o primeiro dia: e o que a deixa ser empurrada
+  // sem se confundir com um treino de outro ciclo.
+  var identidade = {};
+  plano.calendario.forEach(function (sem) {
+    PLANO_DIAS.forEach(function (d) {
+      identidade[sem.dias[d].data] = { ciclo: cfg.dataInicio, semana: sem.semana, dia: d };
+    });
+  });
+  r.sessoes.forEach(function (s) { s.plano = identidade[s.data]; });
   var ciclos = ciclosDoPlano().concat([{ dataInicio: cfg.dataInicio, cfg: cfg, gravado: hojeIso() }]);
   avisar('A gravar…');
   BD.guardarMuitos('sessoes', r.sessoes)
     .then(function () { return BD.guardarMuitos('series', r.series); })
     .then(function () { return guardarDefinicao('planoCiclos', ciclos); })
+    .then(function () { return guardarDefinicao('planoPausados', []); })
     .then(function () {
       Estado.sessoes = Estado.sessoes.concat(r.sessoes);
       Estado.series = Estado.series.concat(r.series);

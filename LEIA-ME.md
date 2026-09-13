@@ -124,6 +124,27 @@ está corrigida.
 
 Os ciclos ficam na base, em `definicoes.planoCiclos`.
 
+### Sugestões (a app a olhar para o que fizeste)
+
+Aparecem no topo do **Plano** (e um aviso no **Treino**), cada uma com o número
+que a justifica e **Aceitar / Ignorar**. Nada muda sozinho. As regras:
+
+| Sugestão | Quando | Aceitar faz |
+|---|---|---|
+| Empurrar o plano | Faltaste à **segunda** ou à **quinta** e não treinaste nenhum dia do plano depois disso. Terça e sexta não empurram. | Todos os treinos por fazer, desse dia em diante, passam 7 dias. Se uma data de destino já tem outro treino, não mexe em nada. |
+| Carga de um acessório | O que fizeste (kg, reps e RIR quando há) aguenta uma carga um passo acima ou abaixo (2,5 kg abaixo de 60, 5 acima). Sem RIR: chegar às reps conta como RIR 2, não chegar como RIR 0. Quem faz o plano tal e qual fica igual. | Muda a carga no catálogo e refaz as séries por fazer desse exercício. |
+| Tirar um acessório | 3 sessões do plano sem passar a anterior. | Sai no ciclo seguinte; o gerador escolhe outro. |
+| Semana mais leve | Numa semana com 3+ treinos, 30% das séries ficaram 2+ reps aquém ou 4+ foram a RIR 0. | A semana seguinte fica a -10%. |
+
+**Máximos.** No ciclo seguinte, cada lift sobe a partir do melhor single feito
+no dia de máximos. Se falhou o single, ou não fez esse dia, não sobe. A folha do
+ciclo seguinte diz a razão de cada um.
+
+As decisões ficam na loja `sugestoes` (pela chave); uma sugestão ignorada não volta.
+As sessões do plano guardam a identidade em `plano: { ciclo, semana, dia }` — é o
+que as deixa mudar de data sem se perderem. As do ciclo 1 reconhecem-se pela nota
+"Semana N - modo".
+
 A barra: **Treino · Plano · Comida · Análises · Mais**. O Peso está dentro da
 Comida; Histórico, Exercícios e Definições dentro do Mais.
 
