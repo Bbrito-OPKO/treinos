@@ -74,66 +74,133 @@ test('gasto medido: menos de 14 dias de comida (ou dias de 500 kcal) nao conta',
   assert.equal(N.gastoMedido(pesagens('2026-08-10', 21, 82, 0), comidas('2026-08-10', 21, 500), '2026-08-30'), null);
 });
 
-const meta = { kcal: 2750, p: 162, h: 355, g: 76 };
-const base = (extra) => ({ perfil, meta, pesoAtual: 81, pesagens: [], comidas: [], avaliacoes: [], treino: null, decididas: {}, ...extra });
+/* --- plano alimentar fixo --------------------------------------------------- */
 
-test('dieta: a ganhar mas o peso parado -> sobe kcal, limitado a +300', () => {
-  const d = base({ perfil: { ...perfil, objetivo: 'ganhar' }, pesagens: pesagens('2026-08-10', 21, 81, 0), comidas: comidas('2026-08-24', 7, 2750, 170) });
-  const s = N.sugerirDieta(d, '2026-08-30').find(x => x.tipo === 'dieta-kcal');
-  // alvo +0,25 ; real 0 ; 0,25 x 7700 / 7 = 275 -> 300 (a 50), dentro do teto
-  assert.ok(s, 'sem sugestao');
-  assert.equal(s.novaMeta.kcal, 3050);
-  const rapido = N.sugerirDieta(base({ perfil: { ...perfil, objetivo: 'perder' }, pesagens: pesagens('2026-08-10', 21, 81, 1),
-    comidas: comidas('2026-08-24', 7, 2750, 170) }), '2026-08-30').find(x => x.tipo === 'dieta-kcal');
-  assert.equal(rapido.novaMeta.kcal, 2450, 'o teto de -300');
+const item = (refeicao, nome, gramas, por100) => ({ refeicao, nome, origem: 'insa', ref: 'insa:' + nome, gramas, por100 });
+const FRANGO = { kcal: 108, p: 24.1, h: 0, g: 1.2 };
+const ARROZ = { kcal: 125, p: 2.5, h: 28, g: 0.2 };
+const AVEIA = { kcal: 366, p: 13.5, h: 61.7, g: 5.8 };
+const AZEITE = { kcal: 900, p: 0, h: 0, g: 100 };
+const treino = [item('Pequeno-almoço', 'Aveia', 80, AVEIA), item('Almoço', 'Frango', 200, FRANGO),
+  item('Almoço', 'Arroz', 250, ARROZ), item('Almoço', 'Azeite', 10, AZEITE), item('Jantar', 'Frango', 200, FRANGO),
+  item('Jantar', 'Arroz', 200, ARROZ)];
+const descanso = [item('Almoço', 'Frango', 200, FRANGO), item('Almoço', 'Arroz', 150, ARROZ), item('Jantar', 'Frango', 200, FRANGO),
+  item('Jantar', 'Azeite', 10, AZEITE), item('Lanche', 'Aveia', 60, AVEIA)];
+const planoAlim = { versoes: [{ desde: '2026-08-01', treino, descanso }] };
+
+test('tipo de dia: seg, ter, qui, sex treino; qua, sab, dom descanso', () => {
+  // 14/09/2026 e segunda
+  assert.deepEqual(['2026-09-14', '2026-09-15', '2026-09-16', '2026-09-17', '2026-09-18', '2026-09-19', '2026-09-20'].map(N.tipoDeDia),
+    ['treino', 'treino', 'descanso', 'treino', 'treino', 'descanso', 'descanso']);
 });
 
-test('dieta: peso no ritmo certo, ou comida mal registada, nao mexe nas kcal', () => {
-  const certo = base({ pesagens: pesagens('2026-08-10', 21, 81, 0.05), comidas: comidas('2026-08-24', 7, 2750, 170) });
-  assert.equal(N.sugerirDieta(certo, '2026-08-30').filter(x => x.tipo === 'dieta-kcal').length, 0);
-  const pouca = base({ perfil: { ...perfil, objetivo: 'ganhar' }, pesagens: pesagens('2026-08-10', 21, 81, 0), comidas: comidas('2026-08-27', 3, 2750, 170) });
-  assert.equal(N.sugerirDieta(pouca, '2026-08-30').filter(x => x.tipo === 'dieta-kcal').length, 0);
+test('consumo: registo ganha ao plano; sem registo conta o plano do tipo de dia; antes do plano nada', () => {
+  // treino: aveia 292,8 + frango 216 + arroz 312,5 + azeite 90 + frango 216 + arroz 250 = 1377,3 -> por item arredondado: 293+216+313+90+216+250 = 1378
+  assert.equal(N.consumoDoDia('2026-09-14', [], planoAlim).kcal, 1378);
+  assert.equal(N.consumoDoDia('2026-09-14', [], planoAlim).origem, 'plano');
+  // descanso: 216 + 188 + 216 + 90 + 220 = 930
+  assert.equal(N.consumoDoDia('2026-09-16', [], planoAlim).kcal, 930);
+  const reg = [{ data: '2026-09-14', gramas: 100, por100: { kcal: 2000, p: 0, h: 0, g: 0 } }];
+  assert.deepEqual([N.consumoDoDia('2026-09-14', reg, planoAlim).kcal, N.consumoDoDia('2026-09-14', reg, planoAlim).origem], [2000, 'registo']);
+  assert.equal(N.consumoDoDia('2026-07-01', [], planoAlim), null);
 });
 
-test('dieta: proteina abaixo de 85% da meta sugere, com gramas de frango', () => {
-  const d = base({ comidas: comidas('2026-08-24', 7, 2750, 120) });
-  const s = N.sugerirDieta(d, '2026-08-31').find(x => x.tipo === 'dieta-proteina');
-  assert.equal(s.titulo, 'Mais 42 g de proteína por dia');
-  assert.match(s.detalhe, /174 g de peito de frango/);   // 42 / 0,241
-  assert.equal(N.sugerirDieta(base({ comidas: comidas('2026-08-24', 7, 2750, 140) }), '2026-08-31').filter(x => x.tipo === 'dieta-proteina').length, 0);
+test('versoes: o dia usa o plano em vigor nessa data, nao o de hoje', () => {
+  const v = { versoes: [{ desde: '2026-08-01', treino, descanso }, { desde: '2026-09-10', treino: [item('Almoço', 'Arroz', 1000, ARROZ)], descanso }] };
+  assert.equal(N.consumoDoDia('2026-09-08', [], v).kcal, 1378);
+  assert.equal(N.consumoDoDia('2026-09-14', [], v).kcal, 1250);
+  assert.equal(N.planoAtualAlimentar(v).desde, '2026-09-10');
 });
 
-test('dieta: fome 4/5 so em defice; energia baixa so com o treino a falhar', () => {
-  const av = [{ data: '2026-08-30', fome: 4, energia: 2, sono: 3 }];
-  const perder = { ...perfil, objetivo: 'perder' };
-  const m = { kcal: 2200, p: 178, h: 250, g: 61 };
-  assert.ok(N.sugerirDieta(base({ perfil: perder, meta: m, avaliacoes: av }), '2026-08-31').some(x => x.tipo === 'dieta-fome'));
-  assert.equal(N.sugerirDieta(base({ avaliacoes: av, gasto: 2750 }), '2026-08-31').some(x => x.tipo === 'dieta-fome'), false, 'em manutencao nao');
-  const treinoMau = { planeados: 4, feitos: 2, maximosFalhados: ['SUPINO'] };
-  const e = N.sugerirDieta(base({ perfil: perder, meta: m, avaliacoes: av, treino: treinoMau }), '2026-08-31').find(x => x.tipo === 'dieta-energia');
-  assert.equal(e.novaMeta.kcal, 2350);
-  assert.match(e.detalhe, /supino/);
-  const treinoBom = { planeados: 4, feitos: 4, maximosFalhados: [] };
-  assert.equal(N.sugerirDieta(base({ perfil: perder, meta: m, avaliacoes: av, treino: treinoBom }), '2026-08-31').some(x => x.tipo === 'dieta-energia'), false);
+test('gasto medido com o plano: dias sem registo contam como plano', () => {
+  // plano so com 2500 kcal nos dois tipos; peso a descer 0,5 kg/semana -> ~3050
+  const p2500 = { versoes: [{ desde: '2026-08-01', treino: [item('Almoço', 'X', 100, { kcal: 2500, p: 150, h: 300, g: 70 })],
+    descanso: [item('Almoço', 'X', 100, { kcal: 2500, p: 150, h: 300, g: 70 })] }] };
+  const g = N.gastoMedido(pesagens('2026-08-10', 21, 82, -0.5), [], '2026-08-30', 21, p2500);
+  assert.ok(Math.abs(g.gasto - 3050) <= 30, String(g && g.gasto));
+  assert.equal(g.diasComida, 21);
 });
 
-test('dieta: gasto medido 100+ kcal longe da formula sugere a meta medida (e so essa)', () => {
-  const pes = pesagens('2026-08-10', 21, 82, -0.5), com = comidas('2026-08-10', 21, 2500, 170);
-  const medido = N.gastoMedido(pes, com, '2026-08-30');
-  const metaFormula = { ...N.metaDeMacros(perfil, 81, 2736), origem: 'formula', gasto: 2736 };
-  const s = N.sugerirDieta(base({ meta: metaFormula, pesagens: pes, comidas: com, medido }), '2026-08-31');
-  assert.equal(s.length, 1);
-  assert.equal(s[0].tipo, 'dieta-medido');
-  assert.equal(s[0].novaMeta.kcal, N.metaDeMacros(perfil, N.pesoMedio(pes, '2026-08-31', 7), medido.gasto).kcal);
-  // meta ja ajustada: nao volta a sugerir
-  assert.equal(N.sugerirDieta(base({ meta: { ...metaFormula, origem: 'ajuste' }, pesagens: pes, comidas: com, medido }), '2026-08-31')
-    .some(x => x.tipo === 'dieta-medido'), false);
+test('cintura: cm/semana entre a primeira e a ultima medida, 14+ dias', () => {
+  const av = [{ data: '2026-09-01', cintura: 86 }, { data: '2026-09-08', cintura: 85.5 }, { data: '2026-09-15', cintura: 85 }];
+  assert.deepEqual(N.tendenciaCintura(av, '2026-09-15'), { cmSemana: -0.5, primeira: 86, ultima: 85, medidas: 3, dias: 14 });
+  assert.equal(N.tendenciaCintura(av.slice(1), '2026-09-15'), null, 'so 7 dias');
+  assert.equal(N.tendenciaCintura([{ data: '2026-09-15', cintura: 85 }], '2026-09-15'), null);
 });
 
-test('dieta: sem perfil ou sem meta nao sugere nada; decididas escondem', () => {
-  assert.deepEqual(N.sugerirDieta(base({ perfil: null }), '2026-08-31'), []);
-  const d = base({ comidas: comidas('2026-08-24', 7, 2750, 120) });
-  const s = N.sugerirDieta(d, '2026-08-31');
-  const ch = {}; s.forEach(x => { ch[x.chave] = 1; });
-  assert.deepEqual(N.sugerirDieta({ ...d, decididas: ch }, '2026-08-31'), []);
+test('ajustar +200 kcal: so os hidratos sobem, a proteina fica, gramas a 5', () => {
+  const r = N.ajustarPlanoKcal(treino, 200);
+  // hidratos no treino: aveia 292,8 + arroz 312,5 + arroz 250 = 855,3 kcal ; fator 1,2338
+  // aveia 80 -> 98,7 -> 100 ; arroz 250 -> 308 -> 310 ; arroz 200 -> 246,8 -> 245
+  assert.deepEqual(r.mudancas.map(m => [m.nome, m.antes, m.depois]), [['Aveia', 80, 100], ['Arroz', 250, 310], ['Arroz', 200, 245]]);
+  assert.ok(Math.abs(r.kcal - 200) <= 25, String(r.kcal));
+  assert.deepEqual(r.itens.filter(i => i.nome === 'Frango').map(i => i.gramas), [200, 200]);
+  assert.equal(treino[2].gramas, 250, 'nao mexe no original');
+});
+
+test('ajustar -300 num plano com poucos hidratos entra a gordura; nunca abaixo de 30%', () => {
+  const pouco = [item('Almoço', 'Frango', 300, FRANGO), item('Almoço', 'Arroz', 100, ARROZ), item('Almoço', 'Azeite', 30, AZEITE)];
+  // hidratos 125 kcal, x0,7 = 87,5 < 300 -> junta o azeite (270) ; base 395 ; fator 1-300/395 = 0,24 -> 0,3
+  const r = N.ajustarPlanoKcal(pouco, -300);
+  assert.deepEqual(r.mudancas.map(m => [m.nome, m.antes, m.depois]), [['Arroz', 100, 30], ['Azeite', 30, 10]]);
+  assert.equal(N.ajustarPlanoKcal([item('Almoço', 'Frango', 300, FRANGO)], 100), null, 'so proteina: nada a mexer');
+});
+
+const perfilM = { ...perfil, objetivo: 'manter' };
+const base = (extra) => ({ perfil: perfilM, planoAlimentar: planoAlim, pesoAtual: 81, pesagens: [], comidas: [], avaliacoes: [], decididas: {}, ...extra });
+
+test('dieta: sem 3 pesagens em 2 semanas pede para se pesar', () => {
+  const s = N.sugerirDieta(base({ pesagens: [{ data: '2026-09-10', kg: 81 }] }), '2026-09-14');
+  assert.equal(s[0].tipo, 'dieta-pesar');
+  assert.match(s[0].detalhe, /Só 1 pesagens/);
+});
+
+test('dieta: a ganhar com o peso parado -> +300 kcal em gramas nos dois planos', () => {
+  const d = base({ perfil: { ...perfil, objetivo: 'ganhar' }, pesagens: pesagens('2026-08-24', 21, 81, 0) });
+  const s = N.sugerirDieta(d, '2026-09-13').find(x => x.tipo === 'dieta-plano');
+  // alvo +0,25 ; 0,25 x 7700 / 7 = 275 -> 300 (a 50)
+  assert.equal(s.titulo, '+300 kcal por dia no plano');
+  assert.ok(s.detalhe.includes('o alvo é +0,25 kg/semana'), s.detalhe);
+  assert.ok(s.linhas.some(l => l.startsWith('Treino · Almoço: Arroz 250 →')), s.linhas.join(' | '));
+  assert.ok(s.linhas.some(l => l.startsWith('Descanso · ')));
+  const kT = N.totaisDeItens(s.novoPlano.treino).kcal - N.totaisDeItens(treino).kcal;
+  assert.ok(Math.abs(kT - 300) <= 30, 'treino +' + kT);
+});
+
+test('dieta: a perder 1 kg/semana (depressa de mais) tira, no maximo 300', () => {
+  const d = base({ perfil: { ...perfil, objetivo: 'perder' }, pesagens: pesagens('2026-08-24', 21, 81, -1) });
+  const s = N.sugerirDieta(d, '2026-09-13').find(x => x.tipo === 'dieta-plano');
+  // alvo -0,5 ; real -1 ; diferenca +0,5 -> +550 -> teto +300 (esta a perder de mais: come mais)
+  assert.equal(s.titulo, '+300 kcal por dia no plano');
+});
+
+test('dieta: peso no ritmo nao mexe; recomposicao (peso parado a perder, cintura a descer) diz para nao mexer', () => {
+  assert.equal(N.sugerirDieta(base({ pesagens: pesagens('2026-08-24', 21, 81, 0.05) }), '2026-09-13').some(x => x.tipo === 'dieta-plano'), false);
+  const av = [{ data: '2026-08-25', cintura: 87 }, { data: '2026-09-12', cintura: 85.5 }];
+  const s = N.sugerirDieta(base({ perfil: { ...perfil, objetivo: 'perder' }, pesagens: pesagens('2026-08-24', 21, 81, 0), avaliacoes: av }), '2026-09-13');
+  assert.equal(s.some(x => x.tipo === 'dieta-plano'), false);
+  const r = s.find(x => x.tipo === 'dieta-recomposicao');
+  assert.match(r.detalhe, /87 → 85,5 cm em 18 dias/);
+  assert.match(r.detalhe, /O peso está parado/);
+  assert.ok(r.detalhe.includes('o alvo é -0,5 kg/semana'), r.detalhe);
+  // sem a cintura a descer, a mesma situacao ajusta o plano
+  assert.ok(N.sugerirDieta(base({ perfil: { ...perfil, objetivo: 'perder' }, pesagens: pesagens('2026-08-24', 21, 81, 0) }), '2026-09-13')
+    .some(x => x.tipo === 'dieta-plano' && x.titulo.startsWith('-300')));
+});
+
+test('dieta: proteina do plano abaixo de 85% do alvo avisa com gramas', () => {
+  // treino 48,2+10,8+... ; o plano de teste tem ~112 g no treino e ~106 no descanso ; alvo manter 2,0 x 81 = 162
+  const s = N.sugerirDieta(base({ pesagens: pesagens('2026-08-24', 21, 81, 0.05) }), '2026-09-13').find(x => x.tipo === 'dieta-proteina');
+  assert.ok(s, 'sem aviso de proteina');
+  assert.match(s.titulo, /faltam \d+ g por dia/);
+  const muito = { versoes: [{ desde: '2026-08-01', treino: [item('Almoço', 'Frango', 700, FRANGO)], descanso: [item('Almoço', 'Frango', 700, FRANGO)] }] };
+  assert.equal(N.sugerirDieta(base({ planoAlimentar: muito, pesagens: pesagens('2026-08-24', 21, 81, 0.05) }), '2026-09-13').some(x => x.tipo === 'dieta-proteina'), false);
+});
+
+test('dieta: sem perfil ou sem plano nao sugere; decididas escondem', () => {
+  assert.deepEqual(N.sugerirDieta(base({ perfil: null }), '2026-09-13'), []);
+  assert.deepEqual(N.sugerirDieta(base({ planoAlimentar: null }), '2026-09-13'), []);
+  const d = base({ perfil: { ...perfil, objetivo: 'ganhar' }, pesagens: pesagens('2026-08-24', 21, 81, 0) });
+  const ch = {}; N.sugerirDieta(d, '2026-09-13').forEach(x => { ch[x.chave] = 1; });
+  assert.deepEqual(N.sugerirDieta({ ...d, decididas: ch }, '2026-09-13'), []);
 });

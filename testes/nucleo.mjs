@@ -37,7 +37,8 @@ const NOMES = [
   'REFEICOES', 'normalizarTexto', 'alimentosDoInsa', 'pesquisarAlimentos', 'macrosDe',
   'totaisDoDia', 'alimentoDoOff', 'registoDeComida', 'copiarComidas', 'habitosDeComida',
   'KCAL_POR_KG', 'ATIVIDADES', 'OBJETIVOS', 'gastoPorFormula', 'macrosParaKcal', 'metaDeMacros',
-  'pesoMedio', 'tendenciaPeso', 'diasComComida', 'gastoMedido', 'resumoTreinoSemana', 'sugerirDieta'
+  'pesoMedio', 'tendenciaPeso', 'diasComComida', 'gastoMedido', 'resumoTreinoSemana', 'sugerirDieta',
+  'tipoDeDia', 'versaoDoPlano', 'planoAtualAlimentar', 'totaisDeItens', 'consumoDoDia', 'tendenciaCintura', 'ajustarPlanoKcal'
 ];
 
 function extrair() {

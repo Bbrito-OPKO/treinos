@@ -147,8 +147,20 @@ que as deixa mudar de data sem se perderem. As do ciclo 1 reconhecem-se pela not
 
 ## Comida
 
-O dia em cinco refeições, com kcal, proteína, hidratos e gordura. Em cada
-refeição, **+ Adicionar** abre a pesquisa:
+A alimentação assenta num **plano fixo**, e não em registar tudo todos os dias:
+
+- **Plano de treino** (seg, ter, qui, sex) e **plano de descanso** (qua, sáb, dom),
+  cada um com os alimentos e as gramas por refeição. Montam-se nos botões com o
+  mesmo nome; o de descanso pode começar como cópia do de treino, e qualquer um
+  pode vir do que ficou registado num dia.
+- **Um dia sem registos conta como o plano** desse tipo de dia. O ecrã mostra-o
+  com "· plano". Mexer num alimento (ou "+ Hoje foi diferente") passa **só esse
+  dia** a registado, com o plano copiado para lá; o plano não muda.
+- **O plano tem versões.** Mudá-lo conta a partir de hoje: os dias de antes
+  continuam a contar com o plano que se comia nessa altura (é o que mantém o gasto
+  medido certo).
+
+Adicionar um alimento (a um plano ou a um dia) abre a pesquisa:
 
 - **Tabela do INSA** (1376 alimentos, v 7.1 - 2026) — funciona sem rede. A
   pesquisa ignora acentos e aceita as palavras por qualquer ordem; o que já usaste
@@ -158,34 +170,27 @@ refeição, **+ Adicionar** abre a pesquisa:
   aparecer na pesquisa sem rede.
 - **Criar alimento** — com os valores do rótulo por 100 g.
 
-Escolhido o alimento, pedem-se as gramas (as da última vez já preenchidas).
-Cada registo guarda uma cópia dos valores: atualizar a tabela não muda o que já
-foi comido. **Guardar** numa refeição fica em "Refeições guardadas"; **Copiar o
-dia anterior** repete o dia de ontem. O peso corporal está em **Peso corporal ›**.
+Cada item guarda uma cópia dos valores: atualizar a tabela não muda o que já foi
+comido. O peso corporal está em **Peso corporal ›**.
 
-### Meta, avaliação e sugestões para a dieta
+### Objetivo, avaliação da semana e ajustes ao plano
 
-**Definir objetivo e meta** (idade, altura, sexo, atividade e objetivo) calcula:
+**Objetivo** (idade, altura, sexo, atividade, objetivo) mostra a proteína alvo
+(2,2 / 2,0 / 1,8 g/kg para perder / manter / ganhar), o gasto pela fórmula
+(Mifflin-St Jeor × atividade), o **gasto medido** quando há 21 dias de pesagens
+(média do que se comeu — plano ou registo — menos a tendência do peso × 7700
+kcal/kg) e as kcal do plano.
 
-- **gasto**: Mifflin-St Jeor × atividade. Com **14+ dias de comida registada**
-  (dias com menos de 800 kcal não contam) **e pesagens em 14+ dias**, passa a
-  ser **medido**: média do que comeste − tendência do peso × 7700 kcal/kg;
-- **kcal**: gasto × (perder −20% · manter 0 · ganhar +10%), arredondado a 50;
-- **proteína** 2,2 / 2,0 / 1,8 g por kg (perder / manter / ganhar), **gordura**
-  o maior entre 0,8 g/kg e 25% das kcal, **hidratos** o resto.
+**Avaliação da semana** (botão azul quando há sugestões ou passou uma semana sem
+medir): a **cintura** (fita à altura do umbigo, de manhã, em jejum), a tendência
+do peso e da cintura, e **as sugestões**, com Aceitar/Ok e Ignorar:
 
-**Avaliação da semana** (o botão fica azul ao fim de 7 dias): peso médio e
-treinos do plano vêm sozinhos; fome, energia e sono de 1 a 5; cintura opcional.
-
-Sugestões (com Aceitar/Ok e Ignorar):
-
-| Sugestão | Quando |
-|---|---|
-| Meta pelo gasto medido | O gasto medido está 100+ kcal longe do da fórmula e a meta ainda é da fórmula. |
-| ± kcal | A tendência do peso (21 dias) está 0,15+ kg/semana longe do alvo (perder −0,5 · manter 0 · ganhar +0,25) e há 4+ dias de comida na semana. Ajuste = diferença × 7700 / 7, a 50, no máximo ±300. |
-| Mais proteína | Média da semana abaixo de 85% da meta. Diz quanto frango ou iogurte grego isso é. |
-| Fome: mais volume | Fome 4 ou 5 em défice. As kcal ficam. |
-| +150 kcal | Energia ou sono ≤ 2, em défice, **e** o treino a falhar (máximos falhados ou menos de 75% dos treinos). |
+| Sugestão | Quando | Aceitar faz |
+|---|---|---|
+| ± kcal no plano | Tendência do peso (21 dias, 3+ pesagens em 14+ dias) 0,15+ kg/semana longe do alvo: perder −0,5 · manter 0 · ganhar +0,25. Ajuste = diferença × 7700 / 7, a 50 kcal, no máximo ±300. | Mostra e aplica as gramas: sobem ou descem os alimentos em que os hidratos dão metade das kcal ou mais (arroz, massa, pão, aveia); a proteína fica. Se for para tirar mais do que os hidratos têm, entra a gordura. Gramas a 5 g, nunca abaixo de 30%. Versão nova do plano a partir de hoje. |
+| Não mexer: estás a perder gordura | A perder (ou a manter) com o peso a descer menos do que o alvo, mas a cintura a descer 0,25+ cm/semana. | Nada — é para não cortar comida quando o físico está a mudar bem. |
+| O plano tem pouca proteína | A média do plano (4 dias de treino, 3 de descanso) abaixo de 85% do alvo. | Nada; diz quanto frango ou iogurte grego falta. |
+| Pesa-te 3+ vezes por semana | Menos de 3 pesagens em 14 dias e sem tendência. | Nada. |
 
 **Tabela do INSA.** Refaz-se com o Excel do PortFIR
 (`portfir.insa.min-saude.pt` › Composição de Alimentos › Descarregar Excel):
