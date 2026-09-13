@@ -33,7 +33,9 @@ const NOMES = [
   'gerarPlano', 'validarPlano', 'planoParaSessoes', 'progredirConfig',
   'mapaDoPlano', 'sugerirEmpurrar', 'aplicarEmpurrar', 'cargaDoFeito', 'sugerirCargas',
   'aplicarCarga', 'resultadosMaximos', 'sugerirEstagnacao', 'sugerirDescarga',
-  'aplicarDescarga', 'calcularSugestoes'
+  'aplicarDescarga', 'calcularSugestoes',
+  'REFEICOES', 'normalizarTexto', 'alimentosDoInsa', 'pesquisarAlimentos', 'macrosDe',
+  'totaisDoDia', 'alimentoDoOff', 'registoDeComida', 'copiarComidas', 'habitosDeComida'
 ];
 
 function extrair() {

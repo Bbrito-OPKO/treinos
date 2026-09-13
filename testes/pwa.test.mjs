@@ -103,7 +103,11 @@ test('o ecrã só se mantém ligado pela via oficial', () => {
   assert.match(html, /if \(document\.hidden\) \{ Ecra\.bloqueio = null;/);
   assert.match(html, /this\.bloqueio\.released !== true/,
     'um bloqueio já largado tem de contar como não ter nenhum');
-  assert.ok(!/<video/i.test(html), 'nada de vídeos escondidos para enganar o iOS');
+  // O unico video permitido e a camara do codigo de barras (cbVideo): visivel,
+  // sem loop nem autoplay. Qualquer outro e o truque que isto quer impedir.
+  const videos = html.match(/<video[^>]*>/gi) || [];
+  assert.ok(videos.every(v => /id="cbVideo"/.test(v) && !/loop|autoplay|hidden|display:\s*none/i.test(v)),
+    'nada de vídeos escondidos para enganar o iOS: ' + videos.join(' '));
 });
 
 test('nao ha nada vindo da rede', () => {

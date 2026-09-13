@@ -18,7 +18,7 @@
    Os dados do utilizador nao passam por aqui: vivem na IndexedDB do telemovel.
    ======================================================================== */
 
-const CACHE = 'treinos-v3';
+const CACHE = 'treinos-v4';
 
 /* Vai buscar a pagina IGNORANDO a cache do browser.
 
@@ -47,6 +47,10 @@ function avisarQueHaVersaoNova() {
 const FICHEIROS = [
   './',
   'index.html',
+  // a tabela do INSA: sem ela na cache, a pesquisa de alimentos nao abria sem rede
+  'alimentos-insa.json',
+  // leitor de codigo de barras (so e carregado quando se usa, mas tem de abrir sem rede)
+  'zxing-browser.min.js',
   'manifest.json',
   'icon-180.png',
   'icon-192.png',

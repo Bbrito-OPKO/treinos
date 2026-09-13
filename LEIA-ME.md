@@ -145,6 +145,41 @@ As sessões do plano guardam a identidade em `plano: { ciclo, semana, dia }` —
 que as deixa mudar de data sem se perderem. As do ciclo 1 reconhecem-se pela nota
 "Semana N - modo".
 
+## Comida
+
+O dia em cinco refeições, com kcal, proteína, hidratos e gordura. Em cada
+refeição, **+ Adicionar** abre a pesquisa:
+
+- **Tabela do INSA** (1376 alimentos, v 7.1 - 2026) — funciona sem rede. A
+  pesquisa ignora acentos e aceita as palavras por qualquer ordem; o que já usaste
+  vem primeiro, e os pratos compostos descem.
+- **Open Food Facts** — por nome (botão no fim da lista) ou **código de barras**
+  (câmara, ou o número escrito à mão). Um produto usado fica guardado e passa a
+  aparecer na pesquisa sem rede.
+- **Criar alimento** — com os valores do rótulo por 100 g.
+
+Escolhido o alimento, pedem-se as gramas (as da última vez já preenchidas).
+Cada registo guarda uma cópia dos valores: atualizar a tabela não muda o que já
+foi comido. **Guardar** numa refeição fica em "Refeições guardadas"; **Copiar o
+dia anterior** repete o dia de ontem. O peso corporal está em **Peso corporal ›**.
+
+**Tabela do INSA.** Refaz-se com o Excel do PortFIR
+(`portfir.insa.min-saude.pt` › Composição de Alimentos › Descarregar Excel):
+
+```
+python ferramentas\converter_insa.py dados-reais\insa_tca.xlsx
+```
+
+As condições do INSA pedem a fonte visível onde os dados aparecem — está no fim
+do ecrã da Comida. Mudar o `alimentos-insa.json` obriga a subir o nome da cache
+no `sw.js`, senão os telemóveis ficam com a tabela antiga.
+
+**Código de barras.** O Safari do iPhone não tem leitor nativo; usa-se a ZXing
+(`zxing-browser.min.js`, @zxing/browser 0.1.5, licença MIT em
+`zxing-browser.LICENSE.txt`), guardada ao lado da app para abrir sem rede.
+
+---
+
 A barra: **Treino · Plano · Comida · Análises · Mais**. O Peso está dentro da
 Comida; Histórico, Exercícios e Definições dentro do Mais.
 
@@ -159,6 +194,9 @@ Comida; Histórico, Exercícios e Definições dentro do Mais.
 | `manifest.json` | Diz ao iPhone como a instalar. |
 | `icon-*.png` | Ícones. Refazem-se com `ferramentas/gerar_icones.py`. |
 | `ferramentas/converter_fitnotes.py` | Converte a base do FitNotes para backup JSON. |
+| `alimentos-insa.json` | Tabela do INSA convertida (só os valores que a Comida usa). |
+| `zxing-browser.min.js` | Leitor de código de barras (MIT). |
+| `ferramentas/converter_insa.py` | Excel do INSA → `alimentos-insa.json`. |
 | `ferramentas/provar_migracao.mjs` | Prova, num Chrome a sério e com o backup real, que mudar a versão da base não perde nada. Correr sempre que a versão da IndexedDB subir. |
 | `testes/` | Testes da lógica crítica. |
 

@@ -2786,6 +2786,142 @@ function calcularSugestoes(ciclos, sessoes, series, exercicios, hoje, decididas)
   return todas.filter(function (s) { return !decididas[s.chave]; });
 }
 
+/* ===========================================================================
+   Comida: alimentos, pesquisa e somas do dia
+
+   Tres origens de alimentos, todos com a mesma forma:
+     { id, origem: 'insa'|'off'|'meu', nome, marca?, codigoBarras?,
+       por100: { kcal, p, h, g, fibra, acucar, sal } }
+   - 'insa': a Tabela da Composicao de Alimentos (alimentos-insa.json, fixa)
+   - 'off' : Open Food Facts, guardado na loja alimentos quando e usado
+   - 'meu' : criado a mao
+
+   Cada registo do dia leva uma COPIA dos valores por 100 g. Se a tabela for
+   atualizada ou um alimento for editado, o que ja foi comido nao muda.
+   ======================================================================== */
+
+var REFEICOES = ['Pequeno-almoço', 'Almoço', 'Lanche', 'Jantar', 'Extra'];
+
+function normalizarTexto(s) {
+  return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    .replace(/[^a-z0-9%]+/g, ' ').trim();
+}
+
+function alimentosDoInsa(json) {
+  var c = json.campos, i = {};
+  c.forEach(function (nome, k) { i[nome] = k; });
+  return json.alimentos.map(function (a) {
+    return {
+      id: 'insa:' + a[i.cod], origem: 'insa', nome: a[i.nome], grupo: a[i.grupo],
+      por100: { kcal: a[i.kcal], p: a[i.proteina], h: a[i.hidratos], g: a[i.gordura],
+        fibra: a[i.fibra], acucar: a[i.acucares], sal: a[i.sal] }
+    };
+  });
+}
+
+/* Pesquisa por palavras, sem acentos: "frango peito cru" encontra
+   "Frango, peito sem pele, cru". Todas as palavras tem de aparecer. Ganha:
+   o que ja foi usado (usos), o que tem as palavras no inicio, o nome mais
+   curto (o alimento simples antes do prato composto). */
+function pesquisarAlimentos(lista, termo, usos, max) {
+  var palavras = normalizarTexto(termo).split(' ').filter(Boolean);
+  if (!palavras.length) return [];
+  usos = usos || {};
+  var achados = [];
+  lista.forEach(function (a) {
+    var nome = normalizarTexto(a.nome + ' ' + (a.marca || ''));
+    var inicioPalavra = 0;
+    for (var k = 0; k < palavras.length; k++) {
+      var pos = nome.indexOf(palavras[k]);
+      if (pos === -1) return;
+      if (pos === 0 || nome[pos - 1] === ' ') inicioPalavra++;
+    }
+    // Os pratos compostos do INSA (arroz de pato, arroz doce) descem: quem
+    // procura "arroz" quer quase sempre o arroz.
+    var pontos = (usos[a.id] || 0) * 100 + inicioPalavra * 10 +
+      (nome.indexOf(palavras[0]) === 0 ? 20 : 0) - nome.length / 10 +
+      (a.grupo === 'Pratos compostos' ? -15 : 0);
+    achados.push({ a: a, pontos: pontos });
+  });
+  achados.sort(function (x, y) { return y.pontos - x.pontos; });
+  return achados.slice(0, max || 30).map(function (x) { return x.a; });
+}
+
+function _um(v) { return Math.round(v * 10) / 10; }
+
+function macrosDe(por100, gramas) {
+  var f = (gramas || 0) / 100;
+  return { kcal: Math.round((por100.kcal || 0) * f), p: _um((por100.p || 0) * f),
+    h: _um((por100.h || 0) * f), g: _um((por100.g || 0) * f) };
+}
+
+function totaisDoDia(comidas, data) {
+  var total = { kcal: 0, p: 0, h: 0, g: 0 }, porRefeicao = {};
+  REFEICOES.forEach(function (r) { porRefeicao[r] = { kcal: 0, p: 0, h: 0, g: 0, itens: [] }; });
+  comidas.forEach(function (c) {
+    if (c.data !== data) return;
+    var m = macrosDe(c.por100, c.gramas);
+    var r = porRefeicao[c.refeicao] || (porRefeicao[c.refeicao] = { kcal: 0, p: 0, h: 0, g: 0, itens: [] });
+    r.itens.push(c);
+    ['kcal', 'p', 'h', 'g'].forEach(function (k) { r[k] += m[k]; total[k] += m[k]; });
+  });
+  ['p', 'h', 'g'].forEach(function (k) {
+    total[k] = _um(total[k]);
+    Object.keys(porRefeicao).forEach(function (r) { porRefeicao[r][k] = _um(porRefeicao[r][k]); });
+  });
+  return { total: total, porRefeicao: porRefeicao };
+}
+
+/* Um produto do Open Food Facts para a forma de alimento. Sem kcal (nem kJ
+   para converter) nao serve: devolve null em vez de inventar. */
+function alimentoDoOff(produto) {
+  if (!produto) return null;
+  var n = produto.nutriments || {};
+  function v(k) { var x = n[k + '_100g']; return Number.isFinite(+x) && x !== '' && x !== null ? +x : null; }
+  var kcal = v('energy-kcal');
+  if (kcal === null && v('energy') !== null) kcal = v('energy') / 4.184;
+  if (kcal === null) return null;
+  var nome = String(produto.product_name_pt || produto.product_name || '').trim();
+  if (!nome) return null;
+  var p = v('proteins'), h = v('carbohydrates'), g = v('fat');
+  return {
+    id: 'off:' + produto.code, origem: 'off', nome: nome,
+    marca: String(produto.brands || '').split(',')[0].trim() || null,
+    codigoBarras: String(produto.code || '') || null,
+    incompleto: p === null || h === null || g === null,
+    por100: { kcal: Math.round(kcal), p: p || 0, h: h || 0, g: g || 0,
+      fibra: v('fiber') || 0, acucar: v('sugars') || 0, sal: v('salt') || 0 }
+  };
+}
+
+function registoDeComida(alimento, data, refeicao, gramas) {
+  return { data: data, refeicao: refeicao, nome: alimento.nome, marca: alimento.marca || null,
+    origem: alimento.origem, ref: alimento.id, gramas: gramas, por100: _copia(alimento.por100) };
+}
+
+/* Copia os registos de um dia (ou so de uma refeicao) para outro. */
+function copiarComidas(comidas, de, para, refeicao) {
+  return comidas.filter(function (c) {
+    return c.data === de && (!refeicao || c.refeicao === refeicao);
+  }).map(function (c) {
+    var n = _copia(c);
+    delete n.id;
+    n.data = para;
+    return n;
+  });
+}
+
+/* Quantas vezes cada alimento foi usado e com que gramas da ultima vez:
+   e o que poe o frango do costume no topo e ja com os 150 g do costume. */
+function habitosDeComida(comidas) {
+  var usos = {}, gramas = {};
+  comidas.slice().sort(function (a, b) { return a.data < b.data ? -1 : 1; }).forEach(function (c) {
+    usos[c.ref] = (usos[c.ref] || 0) + 1;
+    gramas[c.ref] = c.gramas;
+  });
+  return { usos: usos, gramas: gramas };
+}
+
 /* ---------------------------------------------------------------------------
    Backup: as lojas que vao e vem, e juntar sem apagar
 
@@ -6472,18 +6608,382 @@ function renderMais() {
 /* ===========================================================================
    Vista: Comida
 
-   Por agora e o peso corporal. O registo do que se come chega na fase da
-   alimentacao; o separador ja existe para a barra nao mudar outra vez.
+   O dia em refeicoes, com kcal e macros. Adicionar abre uma folha: pesquisa
+   na tabela do INSA e nos alimentos proprios, Open Food Facts por nome ou
+   por codigo de barras, ou criar um alimento. Escolhido o alimento, pedem-se
+   as gramas (as da ultima vez ja preenchidas).
+
+   A tabela do INSA vem num ficheiro a parte (alimentos-insa.json), guardado
+   pelo service worker: funciona sem rede. O Open Food Facts precisa dela.
    ======================================================================== */
+
+var Insa = { lista: null, fonte: '', promessa: null };
+
+function carregarInsa() {
+  if (Insa.promessa) return Insa.promessa;
+  Insa.promessa = fetch('alimentos-insa.json').then(function (r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }).then(function (j) {
+    Insa.lista = alimentosDoInsa(j);
+    Insa.fonte = j.fonte;
+    return Insa.lista;
+  }).catch(function (e) {
+    Insa.promessa = null;
+    throw e;
+  });
+  return Insa.promessa;
+}
+
+function todosOsAlimentos() {
+  return (Insa.lista || []).concat(Estado.alimentos);
+}
 
 function renderComida() {
   $('#titulo').textContent = 'Comida';
   $('#btVoltar').hidden = true;
   $('#btAcao').hidden = true;
-  $('#v-comida').innerHTML =
-    '<p class="mini fraco" style="margin:0 0 12px">O registo das refeições e os macros ' +
-    'chegam na próxima fase. Para já, o peso corporal está aqui.</p><div id="comidaPeso"></div>';
-  analisePeso($('#comidaPeso'));
+  if (!Estado.dataComida) Estado.dataComida = hojeIso();
+  var data = Estado.dataComida;
+  var t = totaisDoDia(Estado.comidas, data);
+  var meta = Estado.definicoes.metaMacros || null;
+
+  function caixa(valor, rotulo, alvo, unidade) {
+    return '<div class="centro crescer"><div style="font-size:21px;font-weight:700" class="nums">' +
+      num(valor, 0) + '</div><div class="mini fraco">' + rotulo +
+      (alvo ? ' / ' + num(alvo, 0) + unidade : '') + '</div></div>';
+  }
+
+  var html = '<div class="linha entre" style="margin-bottom:10px">' +
+    '<button class="btn fina" id="cmAntes" aria-label="dia anterior">&#8249;</button>' +
+    '<div class="centro" style="font-weight:700">' + esc(data === hojeIso() ? 'Hoje' : dataLonga(data)) + '</div>' +
+    '<button class="btn fina" id="cmDepois" aria-label="dia seguinte">&#8250;</button></div>' +
+    '<div class="cartao" style="margin-top:0"><div class="linha entre">' +
+      caixa(t.total.kcal, 'kcal', meta && meta.kcal, '') +
+      caixa(t.total.p, 'proteína', meta && meta.p, ' g') +
+      caixa(t.total.h, 'hidratos', meta && meta.h, ' g') +
+      caixa(t.total.g, 'gordura', meta && meta.g, ' g') +
+    '</div></div>';
+
+  REFEICOES.forEach(function (r) {
+    var pr = t.porRefeicao[r];
+    html += '<div class="lista"><div class="cab linha entre"><span>' + esc(r) +
+      (pr.itens.length ? ' · ' + num(pr.kcal, 0) + ' kcal · ' + num(pr.p, 0) + ' g prot.' : '') + '</span>' +
+      (pr.itens.length ? '<button class="mini" data-cmguardar="' + esc(r) + '" style="color:var(--azul)">Guardar</button>' : '') +
+      '</div>' +
+      pr.itens.map(function (c) {
+        var m = macrosDe(c.por100, c.gramas);
+        return '<button class="item" data-cmreg="' + c.id + '"><div class="crescer">' +
+          '<div style="font-weight:600">' + esc(c.nome) + '</div>' +
+          '<div class="mini fraco">' + num(c.gramas, 0) + ' g · P ' + num(m.p) + ' · H ' + num(m.h) +
+          ' · G ' + num(m.g) + '</div></div>' +
+          '<span class="nums" style="font-weight:700">' + m.kcal + '</span></button>';
+      }).join('') +
+      '<button class="item" data-cmadd="' + esc(r) + '" style="color:var(--azul)">+ Adicionar</button></div>';
+  });
+
+  var ontem = _somarDias(data, -1);
+  var temOntem = Estado.comidas.some(function (c) { return c.data === ontem; });
+  html += (temOntem ? '<button class="btn larga fina" id="cmCopiar">Copiar o dia anterior</button>' : '') +
+    '<button class="btn larga fina" id="cmPeso" style="margin-top:8px">Peso corporal &#8250;</button>' +
+    '<p class="mini fraco" style="margin-top:14px">Fonte: ' + esc(Insa.fonte || 'Base de Dados da Composição de ' +
+      'Alimentos. Instituto Nacional de Saúde Doutor Ricardo Jorge, I. P.- INSA') +
+    '. Produtos de marca: Open Food Facts (ODbL).</p>';
+
+  $('#v-comida').innerHTML = html;
+  $('#cmAntes').onclick = function () { Estado.dataComida = _somarDias(data, -1); render(); };
+  $('#cmDepois').onclick = function () { Estado.dataComida = _somarDias(data, 1); render(); };
+  $('#cmPeso').onclick = function () { trocarVista('peso'); };
+  if ($('#cmCopiar')) $('#cmCopiar').onclick = function () {
+    gravarComidas(copiarComidas(Estado.comidas, ontem, data)).then(function (n) { avisar(n + ' registos copiados'); });
+  };
+  Array.prototype.forEach.call(document.querySelectorAll('[data-cmadd]'), function (b) {
+    b.onclick = function () { adicionarComida(data, b.dataset.cmadd); };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-cmreg]'), function (b) {
+    b.onclick = function () { editarRegistoComida(+b.dataset.cmreg); };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-cmguardar]'), function (b) {
+    b.onclick = function () { guardarRefeicaoModelo(data, b.dataset.cmguardar); };
+  });
+
+  if (!Insa.lista) carregarInsa().then(function () { if (Estado.vista === 'comida') render(); }).catch(function () {});
+}
+
+function gravarComidas(novas) {
+  if (!novas.length) return Promise.resolve(0);
+  var prox = proximoId(Estado.comidas);
+  novas.forEach(function (c) { c.id = prox++; });
+  return BD.guardarMuitos('comidas', novas).then(function () {
+    Estado.comidas = Estado.comidas.concat(novas);
+    render();
+    return novas.length;
+  });
+}
+
+/* --- Folha de adicionar --------------------------------------------------- */
+
+function adicionarComida(data, refeicao) {
+  var habitos = habitosDeComida(Estado.comidas);
+  abrirFolha(refeicao, '<div id="acCorpo"></div>', function (c) {
+    var corpo = c.querySelector('#acCorpo');
+    corpo.innerHTML =
+      '<label class="campo"><span>Procurar alimento</span>' +
+      '<input id="acProc" type="search" placeholder="frango, arroz, iogurte…" autocomplete="off"></label>' +
+      '<div class="linha" style="gap:8px;margin-bottom:12px">' +
+        '<button class="btn fina crescer" id="acBarras">Código de barras</button>' +
+        '<button class="btn fina crescer" id="acCriar">Criar alimento</button></div>' +
+      '<div id="acLista"></div>';
+    var lista = corpo.querySelector('#acLista');
+
+    function linhaAlimento(a, i) {
+      return '<button class="item" data-aci="' + i + '"><div class="crescer">' +
+        '<div style="font-weight:600">' + esc(a.nome) + (a.marca ? ' <span class="fraco">· ' + esc(a.marca) + '</span>' : '') + '</div>' +
+        '<div class="mini fraco">' + num(a.por100.kcal, 0) + ' kcal · P ' + num(a.por100.p) + ' · H ' +
+        num(a.por100.h) + ' · G ' + num(a.por100.g) + ' /100 g' +
+        (a.origem === 'off' ? ' · OFF' : a.origem === 'meu' ? ' · meu' : '') + '</div></div></button>';
+    }
+    function mostrar(achados, extra) {
+      lista.innerHTML = (achados.length ? '<div class="lista">' + achados.map(linhaAlimento).join('') + '</div>' : '') + (extra || '');
+      Array.prototype.forEach.call(lista.querySelectorAll('[data-aci]'), function (b) {
+        b.onclick = function () { escolherGramas(achados[+b.dataset.aci], data, refeicao, habitos); };
+      });
+      var online = lista.querySelector('#acOnline');
+      if (online) online.onclick = function () { procurarOnline(corpo.querySelector('#acProc').value); };
+    }
+    function inicio() {
+      // sem texto: os mais usados e as refeicoes guardadas
+      var usados = Object.keys(habitos.usos).sort(function (a, b) { return habitos.usos[b] - habitos.usos[a]; });
+      var todos = todosOsAlimentos(), porId = {};
+      todos.forEach(function (a) { porId[a.id] = a; });
+      var frequentes = usados.map(function (id) { return porId[id]; }).filter(Boolean).slice(0, 12);
+      var modelos = Estado.refeicoes.map(function (m, i) {
+        var kcal = m.itens.reduce(function (s, it) { return s + macrosDe(it.por100, it.gramas).kcal; }, 0);
+        return '<button class="item" data-acm="' + i + '"><div class="crescer"><div style="font-weight:600">' +
+          esc(m.nome) + '</div><div class="mini fraco">' + m.itens.length + ' alimentos · ' + kcal + ' kcal</div></div></button>';
+      }).join('');
+      mostrar(frequentes, modelos ? '<div class="lista"><div class="cab">Refeições guardadas</div>' + modelos + '</div>' : '');
+      if (frequentes.length) lista.querySelector('.lista').insertAdjacentHTML('afterbegin', '<div class="cab">Mais usados</div>');
+      Array.prototype.forEach.call(lista.querySelectorAll('[data-acm]'), function (b) {
+        b.onclick = function () {
+          var m = Estado.refeicoes[+b.dataset.acm];
+          fecharFolha();
+          gravarComidas(m.itens.map(function (it) {
+            var n = _copia(it); n.data = data; n.refeicao = refeicao; return n;
+          })).then(function (n) { avisar(m.nome + ': ' + n + ' alimentos'); });
+        };
+      });
+    }
+    function procurarOnline(termo) {
+      if (!termo.trim()) return;
+      lista.innerHTML = '<p class="mini fraco">A procurar no Open Food Facts…</p>';
+      var url = 'https://world.openfoodfacts.org/cgi/search.pl?search_simple=1&json=1&page_size=20' +
+        '&fields=code,product_name,product_name_pt,brands,nutriments&search_terms=' + encodeURIComponent(termo);
+      fetch(url).then(function (r) { return r.json(); }).then(function (j) {
+        var achados = (j.products || []).map(alimentoDoOff).filter(Boolean);
+        mostrar(achados, achados.length ? '' : '<p class="mini fraco">Nada no Open Food Facts com esse nome.</p>');
+      }).catch(function () {
+        lista.innerHTML = '<p class="mini" style="color:var(--ambar)">Sem rede: o Open Food Facts precisa de internet. ' +
+          'A tabela do INSA funciona sem.</p>';
+      });
+    }
+
+    var proc = corpo.querySelector('#acProc');
+    proc.oninput = function () {
+      if (!proc.value.trim()) return inicio();
+      var achados = pesquisarAlimentos(todosOsAlimentos(), proc.value, habitos.usos, 30);
+      mostrar(achados, '<button class="btn larga fina" id="acOnline" style="margin-top:4px">Procurar "' +
+        esc(proc.value) + '" no Open Food Facts</button>');
+    };
+    corpo.querySelector('#acBarras').onclick = function () { lerCodigoBarras(data, refeicao, habitos); };
+    corpo.querySelector('#acCriar').onclick = function () { criarAlimento(data, refeicao, habitos, proc.value); };
+    if (!Insa.lista) {
+      lista.innerHTML = '<p class="mini fraco">A carregar a tabela de alimentos…</p>';
+      carregarInsa().then(inicio).catch(function (e) {
+        lista.innerHTML = '<p class="mini" style="color:var(--ambar)">Não carreguei a tabela do INSA (' + esc(e.message) + ').</p>';
+      });
+    } else {
+      inicio();
+    }
+  });
+}
+
+/* Alimentos de fora (OFF) ficam guardados na loja ao serem usados: da proxima
+   vez aparecem na pesquisa sem rede. */
+function guardarAlimentoSeFor(a) {
+  if (a.origem === 'insa') return Promise.resolve(a);
+  var existente = Estado.alimentos.filter(function (x) { return x.id === a.id; })[0];
+  if (existente) return Promise.resolve(existente);
+  var registo = _copia(a);
+  return BD.guardar('alimentos', registo).then(function () {
+    Estado.alimentos.push(registo);
+    return registo;
+  });
+}
+
+function escolherGramas(a, data, refeicao, habitos) {
+  var inicial = habitos.gramas[a.id] || 100;
+  abrirFolha(a.nome, '<div id="egCorpo"></div>', function (c) {
+    var corpo = c.querySelector('#egCorpo');
+    corpo.innerHTML = (a.incompleto ? '<p class="mini" style="color:var(--ambar);margin-top:0">O Open Food Facts ' +
+        'não tem todos os macros deste produto: os que faltam contam como 0.</p>' : '') +
+      '<label class="campo"><span>Gramas</span><input id="egG" type="number" inputmode="decimal" value="' +
+      inicial + '"></label><div class="cartao" style="margin-top:0" id="egMacros"></div>' +
+      '<button class="btn primaria larga" id="egOk">Adicionar a ' + esc(refeicao) + '</button>';
+    var campo = corpo.querySelector('#egG');
+    function atualizar() {
+      var m = macrosDe(a.por100, +campo.value || 0);
+      corpo.querySelector('#egMacros').innerHTML = '<div class="linha entre">' +
+        [[m.kcal, 'kcal'], [m.p, 'proteína'], [m.h, 'hidratos'], [m.g, 'gordura']].map(function (x) {
+          return '<div class="centro crescer"><div style="font-weight:700" class="nums">' + num(x[0]) +
+            '</div><div class="mini fraco">' + x[1] + '</div></div>';
+        }).join('') + '</div>';
+    }
+    campo.oninput = atualizar;
+    atualizar();
+    corpo.querySelector('#egOk').onclick = function () {
+      var g = +campo.value;
+      if (!(g > 0)) { avisar('Gramas em falta'); return; }
+      guardarAlimentoSeFor(a).then(function (guardado) {
+        fecharFolha();
+        return gravarComidas([registoDeComida(guardado, data, refeicao, g)]);
+      });
+    };
+  });
+}
+
+function editarRegistoComida(id) {
+  var reg = Estado.comidas.filter(function (c) { return c.id === id; })[0];
+  if (!reg) return;
+  abrirFolha(reg.nome, '<label class="campo"><span>Gramas</span><input id="erG" type="number" inputmode="decimal" value="' +
+    reg.gramas + '"></label><button class="btn primaria larga" id="erOk">Guardar</button>' +
+    '<button class="btn larga perigo" id="erApagar" style="margin-top:8px">Apagar</button>', function (c) {
+    c.querySelector('#erOk').onclick = function () {
+      var g = +c.querySelector('#erG').value;
+      if (!(g > 0)) { avisar('Gramas em falta'); return; }
+      reg.gramas = g;
+      BD.guardar('comidas', reg).then(function () { fecharFolha(); render(); });
+    };
+    c.querySelector('#erApagar').onclick = function () {
+      BD.apagar('comidas', id).then(function () {
+        Estado.comidas = Estado.comidas.filter(function (x) { return x.id !== id; });
+        fecharFolha();
+        render();
+      });
+    };
+  });
+}
+
+function guardarRefeicaoModelo(data, refeicao) {
+  var itens = Estado.comidas.filter(function (c) { return c.data === data && c.refeicao === refeicao; });
+  abrirFolha('Guardar refeição', '<label class="campo"><span>Nome</span><input id="grNome" value="' +
+    esc(refeicao) + ' de ' + esc(dataCurta(data)) + '"></label>' +
+    '<p class="mini fraco">' + itens.length + ' alimentos. Fica em "Refeições guardadas" ao adicionar.</p>' +
+    '<button class="btn primaria larga" id="grOk">Guardar</button>', function (c) {
+    c.querySelector('#grOk').onclick = function () {
+      var m = { nome: c.querySelector('#grNome').value.trim() || refeicao, itens: itens.map(function (it) {
+        var n = _copia(it); delete n.id; delete n.data; return n;
+      }) };
+      m.id = proximoId(Estado.refeicoes);
+      BD.guardar('refeicoes', m).then(function () {
+        Estado.refeicoes.push(m);
+        fecharFolha();
+        avisar('Refeição guardada');
+      });
+    };
+  });
+}
+
+function criarAlimento(data, refeicao, habitos, nomeInicial) {
+  function campo(id, rotulo, valor) {
+    return '<label class="campo crescer" style="margin:0"><span>' + rotulo + '</span><input id="' + id +
+      '" type="number" inputmode="decimal" value="' + (valor || '') + '"></label>';
+  }
+  abrirFolha('Criar alimento', '<label class="campo"><span>Nome</span><input id="caNome" value="' +
+    esc(nomeInicial || '') + '"></label>' +
+    '<p class="mini fraco" style="margin:0 0 8px">Valores por 100 g (vêm no rótulo).</p>' +
+    '<div class="linha" style="gap:8px;margin-bottom:10px">' + campo('caKcal', 'kcal') + campo('caP', 'Proteína') + '</div>' +
+    '<div class="linha" style="gap:8px;margin-bottom:14px">' + campo('caH', 'Hidratos') + campo('caG', 'Gordura') + '</div>' +
+    '<button class="btn primaria larga" id="caOk">Criar e escolher gramas</button>', function (c) {
+    c.querySelector('#caOk').onclick = function () {
+      var nome = c.querySelector('#caNome').value.trim();
+      var v = function (id) { return +c.querySelector(id).value || 0; };
+      if (!nome || !(v('#caKcal') > 0)) { avisar('Faltam o nome e as kcal'); return; }
+      var a = { id: 'meu:' + Date.now(), origem: 'meu', nome: nome,
+        por100: { kcal: v('#caKcal'), p: v('#caP'), h: v('#caH'), g: v('#caG'), fibra: 0, acucar: 0, sal: 0 } };
+      guardarAlimentoSeFor(a).then(function (g) { escolherGramas(g, data, refeicao, habitos); });
+    };
+  });
+}
+
+/* --- Codigo de barras ------------------------------------------------------
+   O Safari do iPhone nao tem BarcodeDetector, por isso usa-se a ZXing
+   (@zxing/browser 0.1.5, MIT), guardada ao lado da app e na cache do service
+   worker: le o codigo sem rede, e um produto ja usado encontra-se sem rede.
+   So se carrega a primeira vez que se carrega no botao (sao 400 KB). */
+var ZXING_URL = 'zxing-browser.min.js';
+
+function carregarZxing() {
+  if (window.ZXingBrowser) return Promise.resolve(window.ZXingBrowser);
+  return new Promise(function (resolve, reject) {
+    var s = document.createElement('script');
+    s.src = ZXING_URL;
+    s.onload = function () { window.ZXingBrowser ? resolve(window.ZXingBrowser) : reject(new Error('ZXing não carregou')); };
+    s.onerror = function () { reject(new Error('sem rede para o leitor')); };
+    document.head.appendChild(s);
+  });
+}
+
+function procurarCodigo(codigo) {
+  var local = Estado.alimentos.filter(function (a) { return a.codigoBarras === codigo; })[0];
+  if (local) return Promise.resolve(local);
+  return fetch('https://world.openfoodfacts.org/api/v2/product/' + encodeURIComponent(codigo) +
+    '.json?fields=code,product_name,product_name_pt,brands,nutriments')
+    .then(function (r) { return r.status === 404 ? { status: 0 } : r.json(); })
+    .then(function (j) { return j && j.status === 1 ? alimentoDoOff(j.product) : null; });
+}
+
+function lerCodigoBarras(data, refeicao, habitos) {
+  var controlos = null;
+  function parar() { try { if (controlos) controlos.stop(); } catch (e) { /* ja parado */ } controlos = null; }
+  abrirFolha('Código de barras',
+    '<video id="cbVideo" playsinline muted style="width:100%;border-radius:12px;background:#000;max-height:280px"></video>' +
+    '<p class="mini fraco" id="cbEstado">A abrir a câmara…</p>' +
+    '<div class="linha" style="gap:8px"><input id="cbManual" inputmode="numeric" placeholder="ou escreve o número" ' +
+      'style="flex:1;min-height:44px;border-radius:10px;padding:0 12px;background:var(--sup2);color:inherit;border:1px solid var(--borda)">' +
+    '<button class="btn fina" id="cbOk">Procurar</button></div>', function (c) {
+    var estado = c.querySelector('#cbEstado');
+    function tratar(codigo) {
+      parar();
+      estado.textContent = 'A procurar ' + codigo + '…';
+      procurarCodigo(codigo).then(function (a) {
+        if (a) return escolherGramas(a, data, refeicao, habitos);
+        estado.innerHTML = 'O código ' + esc(codigo) + ' não está no Open Food Facts (ou não tem kcal). ' +
+          '<button class="btn fina" id="cbCriar" style="margin-top:8px">Criar alimento</button>';
+        c.querySelector('#cbCriar').onclick = function () { criarAlimento(data, refeicao, habitos, ''); };
+      }).catch(function () { estado.textContent = 'Sem rede para procurar o código.'; });
+    }
+    c.querySelector('#cbOk').onclick = function () {
+      var v = c.querySelector('#cbManual').value.replace(/\D/g, '');
+      if (v) tratar(v);
+    };
+    carregarZxing().then(function (Z) {
+      var leitor = new Z.BrowserMultiFormatReader();
+      return leitor.decodeFromVideoDevice(undefined, c.querySelector('#cbVideo'), function (res, erro, ctl) {
+        controlos = ctl;
+        if (res) tratar(res.getText());
+      }).then(function (ctl) { controlos = ctl; estado.textContent = 'Aponta ao código de barras.'; });
+    }).catch(function (e) {
+      estado.textContent = 'Câmara indisponível (' + (e && e.message ? e.message : e) + '). Escreve o número.';
+    });
+    // fechar a folha desliga a camara
+    var fechar = $('#folhaFechar').onclick, veu = $('#veu').onclick;
+    $('#folhaFechar').onclick = $('#veu').onclick = function () {
+      parar();
+      $('#folhaFechar').onclick = fechar; $('#veu').onclick = veu;
+      fecharFolha();
+    };
+  });
 }
 
 /* ===========================================================================
@@ -6866,7 +7366,7 @@ function render() {
 
   // Os ecras que vivem dentro do Mais tem um Voltar para o Mais. Os Exercicios
   // com um grupo aberto ja tem o seu (volta aos grupos), e esse ganha.
-  if (SEPARADOR_DA_VISTA[Estado.vista] === 'mais' &&
+  if (SEPARADOR_DA_VISTA[Estado.vista] &&
       !(Estado.vista === 'exercicios' && Estado.grupoAberto)) {
     $('#btVoltar').hidden = false;
   }
@@ -6941,7 +7441,7 @@ function arrancar() {
     // O mesmo botao serve os dois sitios onde se entra um nivel: o registo de
     // um exercicio no treino, e um grupo muscular nos Exercicios.
     if (Estado.vista === 'exercicios' && Estado.grupoAberto) { Estado.grupoAberto = null; render(); return; }
-    if (SEPARADOR_DA_VISTA[Estado.vista] === 'mais') { trocarVista('mais'); return; }
+    if (SEPARADOR_DA_VISTA[Estado.vista]) { trocarVista(SEPARADOR_DA_VISTA[Estado.vista]); return; }
     Estado.exercicioAtivo = null;
     render();
   };
