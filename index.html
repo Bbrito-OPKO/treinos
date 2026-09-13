@@ -1507,6 +1507,59 @@ function progressoDeObjetivo(valorAtual, objetivo, hoje) {
   };
 }
 
+/* ---------------------------------------------------------------------------
+   Backup: as lojas que vao e vem, e juntar sem apagar
+
+   Repor apagava tudo antes de escrever, e um backup antigo levava consigo os
+   treinos registados depois dele. Juntar escreve por cima pelo id — o mesmo
+   registo editado no telemovel fica com a versao do backup, e o que so existe
+   na app fica.
+
+   So e seguro quando os ids vem da mesma app. Um backup de outra origem pode
+   ter o id 1255 para uma sessao de outro dia, e escrever por cima trocava um
+   treino por outro sem dizer nada. Por isso cada loja tem uma identidade (o
+   que faz de um registo "o mesmo"), e um id igual com identidade diferente e
+   um conflito: nao se junta nada e diz-se porque.
+   ------------------------------------------------------------------------- */
+
+var LOJAS_BACKUP = [
+  'exercicios', 'sessoes', 'series', 'pesagens',
+  'alimentos', 'refeicoes', 'comidas', 'avaliacoes', 'sugestoes'
+];
+
+var IDENTIDADE_BACKUP = {
+  exercicios: function (r) { return String(r.nome || '').trim().toLowerCase(); },
+  sessoes: function (r) { return r.data; },
+  series: function (r) { return r.data + '|' + r.exercicioId; },
+  pesagens: function (r) { return r.data; },
+  alimentos: function (r) { return String(r.nome || '').trim().toLowerCase(); },
+  comidas: function (r) { return r.data; },
+  avaliacoes: function (r) { return r.data; }
+};
+
+function juntarBackup(atual, backup) {
+  var conflitos = [];
+  var contagem = {};
+  LOJAS_BACKUP.forEach(function (loja) {
+    var c = { novos: 0, atualizados: 0, iguais: 0 };
+    contagem[loja] = c;
+    var porId = {};
+    (atual[loja] || []).forEach(function (r) { porId[r.id] = r; });
+    var identidade = IDENTIDADE_BACKUP[loja];
+    (backup[loja] || []).forEach(function (r) {
+      var existente = porId[r.id];
+      if (!existente) { c.novos++; return; }
+      if (identidade && identidade(existente) !== identidade(r)) {
+        conflitos.push({ loja: loja, id: r.id, atual: identidade(existente), backup: identidade(r) });
+        return;
+      }
+      if (JSON.stringify(existente) === JSON.stringify(r)) c.iguais++;
+      else c.atualizados++;
+    });
+  });
+  return { conflitos: conflitos, contagem: contagem };
+}
+
 /* ===========================================================================
    NÚCLEO:FIM
    ======================================================================== */
@@ -1525,7 +1578,7 @@ function progressoDeObjetivo(valorAtual, objetivo, hoje) {
    ======================================================================== */
 
 var BD = (function () {
-  var NOME = 'treinos', VERSAO = 2, ligacao = null;
+  var NOME = 'treinos', VERSAO = 3, ligacao = null;
 
   function abrir() {
     if (ligacao) return Promise.resolve(ligacao);
@@ -1562,6 +1615,28 @@ var BD = (function () {
         if (!bd.objectStoreNames.contains('pesagens')) {
           var pe = bd.createObjectStore('pesagens', { keyPath: 'id', autoIncrement: true });
           pe.createIndex('data', 'data', { unique: false });
+        }
+        // Versao 3: alimentacao e sugestoes. So se criam lojas novas e vazias —
+        // nenhuma das anteriores e tocada, e o teste de migracao prova-o.
+        if (!bd.objectStoreNames.contains('alimentos')) {
+          var al = bd.createObjectStore('alimentos', { keyPath: 'id', autoIncrement: true });
+          al.createIndex('nome', 'nome', { unique: false });
+          al.createIndex('codigoBarras', 'codigoBarras', { unique: false });
+        }
+        if (!bd.objectStoreNames.contains('refeicoes')) {
+          bd.createObjectStore('refeicoes', { keyPath: 'id', autoIncrement: true });
+        }
+        if (!bd.objectStoreNames.contains('comidas')) {
+          var co = bd.createObjectStore('comidas', { keyPath: 'id', autoIncrement: true });
+          co.createIndex('data', 'data', { unique: false });
+        }
+        if (!bd.objectStoreNames.contains('avaliacoes')) {
+          var av = bd.createObjectStore('avaliacoes', { keyPath: 'id', autoIncrement: true });
+          av.createIndex('data', 'data', { unique: false });
+        }
+        if (!bd.objectStoreNames.contains('sugestoes')) {
+          var su = bd.createObjectStore('sugestoes', { keyPath: 'id', autoIncrement: true });
+          su.createIndex('estado', 'estado', { unique: false });
         }
       };
       pedido.onsuccess = function () {
@@ -1677,6 +1752,11 @@ var Estado = {
   sessoes: [],
   series: [],
   pesagens: [],
+  alimentos: [],
+  refeicoes: [],
+  comidas: [],
+  avaliacoes: [],
+  sugestoes: [],
   definicoes: {
     descansoPadraoSeg: 120,
     ultimoExercicio: null
@@ -4962,33 +5042,56 @@ function importarBackupFicheiro(texto, nome) {
     '</div>' + (datas.length ? '<p class="pequeno suave" style="margin:10px 0 0">De ' +
       esc(dataLonga(datas[0])) + ' a ' + esc(dataLonga(datas[datas.length - 1])) + '</p>' : '') +
     '</div>' +
-    '<button class="btn primaria larga" id="bRepor">Repor este backup</button>' +
-    '<button class="btn larga" id="bCancelar" style="margin-top:8px">Cancelar</button>' +
-    '<p class="mini fraco" style="margin-top:12px">Repor apaga o que está na app agora.</p>',
+    '<button class="btn primaria larga" id="bJuntar">Juntar ao que está na app</button>' +
+    '<p class="mini fraco" style="margin:6px 0 0">Não apaga nada. O que está no backup ' +
+      'escreve por cima do mesmo registo; o que só existe na app fica.</p>' +
+    '<button class="btn larga" id="bRepor" style="margin-top:14px">Repor (apaga o que está na app)</button>' +
+    '<button class="btn larga" id="bCancelar" style="margin-top:8px">Cancelar</button>',
     function (c) {
       c.querySelector('#bCancelar').onclick = fecharFolha;
-      c.querySelector('#bRepor').onclick = function () {
+      c.querySelector('#bJuntar').onclick = function () {
+        var r = juntarBackup(Estado, b);
+        if (r.conflitos.length) {
+          var x = r.conflitos[0];
+          avisar('Não juntei nada: ' + r.conflitos.length + ' registos têm o mesmo id com ' +
+            'outro conteúdo (ex.: ' + x.loja + ' ' + x.id + '). Este backup não é desta app.');
+          return;
+        }
         fecharFolha();
-        aplicarImportacao(b, 'backup');
+        aplicarImportacao(b, 'backup', 'juntar');
+      };
+      // Sem confirm() do browser: o primeiro toque arma, o segundo apaga.
+      var armado = false;
+      c.querySelector('#bRepor').onclick = function (e) {
+        if (!armado) {
+          armado = true;
+          e.target.textContent = 'Toca outra vez para apagar e repor';
+          e.target.classList.add('perigo');
+          return;
+        }
+        fecharFolha();
+        aplicarImportacao(b, 'backup', 'repor');
       };
     });
 }
 
-function aplicarImportacao(dados, origem) {
+function aplicarImportacao(dados, origem, modo) {
+  var presentes = LOJAS_BACKUP.filter(function (l) { return Array.isArray(dados[l]); });
+  // Repor limpa as quatro de sempre e as que o ficheiro traz. Um backup antigo,
+  // sem alimentacao, nao leva consigo a alimentacao registada na app.
+  var aLimpar = ['exercicios', 'sessoes', 'series', 'pesagens'];
+  presentes.forEach(function (l) { if (aLimpar.indexOf(l) === -1) aLimpar.push(l); });
+  var antes = modo === 'juntar' ? Promise.resolve() : BD.limpar(aLimpar);
   avisar('A importar…');
-  BD.limpar(['exercicios', 'sessoes', 'series', 'pesagens']).then(function () {
-    return Promise.all([
-      BD.guardarMuitos('exercicios', dados.exercicios || []),
-      BD.guardarMuitos('sessoes', dados.sessoes || []),
-      BD.guardarMuitos('series', dados.series || []),
-      BD.guardarMuitos('pesagens', dados.pesagens || [])
-    ]);
+  antes.then(function () {
+    return Promise.all(presentes.map(function (l) { return BD.guardarMuitos(l, dados[l]); }));
   }).then(function () {
     return carregarTudo();
   }).then(function () {
     Estado.exercicioAnalise = null;
     Estado.exercicioAtivo = null;
-    avisar(num(Estado.series.length, 0) + ' séries importadas do ' + origem);
+    avisar(num(Estado.series.length, 0) + ' séries na app depois de ' +
+      (modo === 'juntar' ? 'juntar' : 'importar') + ' o ' + origem);
     render();
   }).catch(function (erro) {
     avisar('A importação falhou: ' + erro.message);
@@ -5010,14 +5113,12 @@ function descarregar(nomeFicheiro, texto, tipo) {
 function exportarJson() {
   var backup = {
     formato: 'treinos-backup',
-    versao: 1,
+    versao: 2,
     origem: 'app Treinos',
-    exportado: new Date().toISOString(),
-    exercicios: Estado.exercicios,
-    sessoes: Estado.sessoes,
-    series: Estado.series,
-    pesagens: Estado.pesagens
+    exportado: new Date().toISOString()
   };
+  // As definicoes ficam de fora de proposito: vai la morar a chave da IA.
+  LOJAS_BACKUP.forEach(function (l) { backup[l] = Estado[l]; });
   descarregar('treinos-' + hojeIso() + '.json', JSON.stringify(backup), 'application/json');
   guardarDefinicao('ultimoBackup', hojeIso()).then(function () {
     avisar('Backup guardado');
@@ -5090,18 +5191,11 @@ function render() {
 }
 
 function carregarTudo() {
-  return Promise.all([
-    BD.todos('exercicios'),
-    BD.todos('sessoes'),
-    BD.todos('series'),
-    BD.todos('pesagens'),
-    BD.todos('definicoes')
-  ]).then(function (r) {
-    Estado.exercicios = r[0] || [];
-    Estado.sessoes = r[1] || [];
-    Estado.series = r[2] || [];
-    Estado.pesagens = r[3] || [];
-    (r[4] || []).forEach(function (d) { Estado.definicoes[d.chave] = d.valor; });
+  return Promise.all(LOJAS_BACKUP.map(function (l) { return BD.todos(l); })
+    .concat([BD.todos('definicoes')])
+  ).then(function (r) {
+    LOJAS_BACKUP.forEach(function (l, i) { Estado[l] = r[i] || []; });
+    (r[LOJAS_BACKUP.length] || []).forEach(function (d) { Estado.definicoes[d.chave] = d.valor; });
     reindexar();
   });
 }
