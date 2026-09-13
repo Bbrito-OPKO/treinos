@@ -163,6 +163,30 @@ Cada registo guarda uma cópia dos valores: atualizar a tabela não muda o que j
 foi comido. **Guardar** numa refeição fica em "Refeições guardadas"; **Copiar o
 dia anterior** repete o dia de ontem. O peso corporal está em **Peso corporal ›**.
 
+### Meta, avaliação e sugestões para a dieta
+
+**Definir objetivo e meta** (idade, altura, sexo, atividade e objetivo) calcula:
+
+- **gasto**: Mifflin-St Jeor × atividade. Com **14+ dias de comida registada**
+  (dias com menos de 800 kcal não contam) **e pesagens em 14+ dias**, passa a
+  ser **medido**: média do que comeste − tendência do peso × 7700 kcal/kg;
+- **kcal**: gasto × (perder −20% · manter 0 · ganhar +10%), arredondado a 50;
+- **proteína** 2,2 / 2,0 / 1,8 g por kg (perder / manter / ganhar), **gordura**
+  o maior entre 0,8 g/kg e 25% das kcal, **hidratos** o resto.
+
+**Avaliação da semana** (o botão fica azul ao fim de 7 dias): peso médio e
+treinos do plano vêm sozinhos; fome, energia e sono de 1 a 5; cintura opcional.
+
+Sugestões (com Aceitar/Ok e Ignorar):
+
+| Sugestão | Quando |
+|---|---|
+| Meta pelo gasto medido | O gasto medido está 100+ kcal longe do da fórmula e a meta ainda é da fórmula. |
+| ± kcal | A tendência do peso (21 dias) está 0,15+ kg/semana longe do alvo (perder −0,5 · manter 0 · ganhar +0,25) e há 4+ dias de comida na semana. Ajuste = diferença × 7700 / 7, a 50, no máximo ±300. |
+| Mais proteína | Média da semana abaixo de 85% da meta. Diz quanto frango ou iogurte grego isso é. |
+| Fome: mais volume | Fome 4 ou 5 em défice. As kcal ficam. |
+| +150 kcal | Energia ou sono ≤ 2, em défice, **e** o treino a falhar (máximos falhados ou menos de 75% dos treinos). |
+
 **Tabela do INSA.** Refaz-se com o Excel do PortFIR
 (`portfir.insa.min-saude.pt` › Composição de Alimentos › Descarregar Excel):
 

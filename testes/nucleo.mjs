@@ -35,7 +35,9 @@ const NOMES = [
   'aplicarCarga', 'resultadosMaximos', 'sugerirEstagnacao', 'sugerirDescarga',
   'aplicarDescarga', 'calcularSugestoes',
   'REFEICOES', 'normalizarTexto', 'alimentosDoInsa', 'pesquisarAlimentos', 'macrosDe',
-  'totaisDoDia', 'alimentoDoOff', 'registoDeComida', 'copiarComidas', 'habitosDeComida'
+  'totaisDoDia', 'alimentoDoOff', 'registoDeComida', 'copiarComidas', 'habitosDeComida',
+  'KCAL_POR_KG', 'ATIVIDADES', 'OBJETIVOS', 'gastoPorFormula', 'macrosParaKcal', 'metaDeMacros',
+  'pesoMedio', 'tendenciaPeso', 'diasComComida', 'gastoMedido', 'resumoTreinoSemana', 'sugerirDieta'
 ];
 
 function extrair() {

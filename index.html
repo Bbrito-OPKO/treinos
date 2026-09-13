@@ -2922,6 +2922,208 @@ function habitosDeComida(comidas) {
   return { usos: usos, gramas: gramas };
 }
 
+/* ===========================================================================
+   Macros: meta, gasto medido, avaliacao semanal e sugestoes para a dieta
+
+   A meta arranca numa formula (Mifflin-St Jeor x atividade). Com 2 a 3
+   semanas de comida registada e pesagens, passa a haver um gasto MEDIDO:
+   o que se comeu em media menos o que o peso mostra que sobrou ou faltou
+   (7700 kcal por kg). Esse numero ganha a formula, porque e dele.
+
+   As sugestoes seguem a regra das do treino: numero + Aceitar/Ignorar.
+   ======================================================================== */
+
+var KCAL_POR_KG = 7700;
+
+var ATIVIDADES = {
+  sedentario: { nome: 'Sentado quase todo o dia', fator: 1.2 },
+  leve: { nome: 'Leve (anda a pé, 1-3 treinos)', fator: 1.375 },
+  moderado: { nome: 'Moderado (3-5 treinos)', fator: 1.55 },
+  alto: { nome: 'Alto (6-7 treinos ou trabalho físico)', fator: 1.725 },
+  muitoAlto: { nome: 'Muito alto (atleta, 2x por dia)', fator: 1.9 }
+};
+
+/* Por objetivo: ajuste as kcal de manutencao, proteina por kg, e o ritmo de
+   peso que se procura (kg por semana). */
+var OBJETIVOS = {
+  perder: { nome: 'Perder gordura', ajuste: -0.2, proteina: 2.2, ritmo: -0.5 },
+  manter: { nome: 'Manter / recompor', ajuste: 0, proteina: 2.0, ritmo: 0 },
+  ganhar: { nome: 'Ganhar força e massa', ajuste: 0.1, proteina: 1.8, ritmo: 0.25 }
+};
+
+function gastoPorFormula(perfil, pesoKg) {
+  var bmr = 10 * pesoKg + 6.25 * perfil.altura - 5 * perfil.idade + (perfil.sexo === 'F' ? -161 : 5);
+  return Math.round(bmr * ATIVIDADES[perfil.atividade].fator);
+}
+
+function _arredondar(v, passo) { return Math.round(v / passo) * passo; }
+
+/* kcal -> macros: proteina e gordura primeiro (por kg), hidratos o resto. */
+function macrosParaKcal(kcal, pesoKg, objetivo) {
+  var p = Math.round(OBJETIVOS[objetivo].proteina * pesoKg);
+  var g = Math.round(Math.max(0.8 * pesoKg, kcal * 0.25 / 9));
+  var h = Math.max(0, Math.round((kcal - p * 4 - g * 9) / 4));
+  return { kcal: kcal, p: p, h: h, g: g };
+}
+
+function metaDeMacros(perfil, pesoKg, gasto) {
+  var obj = OBJETIVOS[perfil.objetivo];
+  var kcal = _arredondar(gasto * (1 + obj.ajuste), 50);
+  return macrosParaKcal(kcal, pesoKg, perfil.objetivo);
+}
+
+/* Media das pesagens nos `dias` ate `data` (inclusive). */
+function pesoMedio(pesagens, data, dias) {
+  var desde = _somarDias(data, -(dias - 1));
+  var v = pesagens.filter(function (p) { return p.data >= desde && p.data <= data && p.kg > 0; });
+  if (!v.length) return null;
+  return _um(v.reduce(function (s, p) { return s + p.kg; }, 0) / v.length);
+}
+
+/* Tendencia do peso em kg/semana: reta dos minimos quadrados nas pesagens da
+   janela. Uma pesagem isolada num dia de muita agua pesa pouco numa reta. */
+function tendenciaPeso(pesagens, ate, dias) {
+  var desde = _somarDias(ate, -(dias - 1));
+  var pts = pesagens.filter(function (p) { return p.data >= desde && p.data <= ate && p.kg > 0; })
+    .map(function (p) { return [diasEntre(desde, p.data), p.kg]; });
+  if (pts.length < 3) return null;
+  var xs = pts.map(function (p) { return p[0]; });
+  var span = Math.max.apply(null, xs) - Math.min.apply(null, xs);
+  if (span < Math.min(14, dias - 1)) return null;
+  var n = pts.length, sx = 0, sy = 0, sxx = 0, sxy = 0;
+  pts.forEach(function (p) { sx += p[0]; sy += p[1]; sxx += p[0] * p[0]; sxy += p[0] * p[1]; });
+  var declive = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+  return { kgSemana: Math.round(declive * 7 * 100) / 100, pesagens: n, dias: span };
+}
+
+/* Dias com comida registada a serio (acima de 800 kcal: abaixo disso e um
+   dia em que so se registou metade, e puxava a media para baixo). */
+function diasComComida(comidas, ate, dias) {
+  var desde = _somarDias(ate, -(dias - 1));
+  var porDia = {};
+  comidas.forEach(function (c) {
+    if (c.data < desde || c.data > ate) return;
+    porDia[c.data] = (porDia[c.data] || { kcal: 0, p: 0, h: 0, g: 0 });
+    var m = macrosDe(c.por100, c.gramas);
+    ['kcal', 'p', 'h', 'g'].forEach(function (k) { porDia[c.data][k] += m[k]; });
+  });
+  return Object.keys(porDia).filter(function (d) { return porDia[d].kcal >= 800; })
+    .map(function (d) { return { data: d, kcal: porDia[d].kcal, p: porDia[d].p, h: porDia[d].h, g: porDia[d].g }; });
+}
+
+/* Gasto medido em `dias` (21): media do que se comeu menos a variacao do
+   peso convertida em kcal. So com 14+ dias de comida e tendencia de peso. */
+function gastoMedido(pesagens, comidas, ate, dias) {
+  dias = dias || 21;
+  var t = tendenciaPeso(pesagens, ate, dias);
+  var dc = diasComComida(comidas, ate, dias);
+  if (!t || dc.length < 14) return null;
+  var media = dc.reduce(function (s, d) { return s + d.kcal; }, 0) / dc.length;
+  return { gasto: _arredondar(media - t.kgSemana * KCAL_POR_KG / 7, 10),
+    kcalMedia: Math.round(media), diasComida: dc.length, tendencia: t };
+}
+
+/* O treino da ultima semana, para a avaliacao e para as sugestoes. */
+function resumoTreinoSemana(ciclos, sessoes, series, exercicios, hoje) {
+  var mapa = mapaDoPlano(ciclos, sessoes);
+  var porSessao = _seriesPorSessao(series);
+  var desde = _somarDias(hoje, -7);
+  var dias = _diasDoMapa(mapa).filter(function (d) { return d.data >= desde && d.data < hoje; });
+  var feitos = dias.filter(function (d) { return _feitasDoDia(d, porSessao).feitas > 0; }).length;
+  var res = resultadosMaximos(mapa, series, exercicios, hoje);
+  var falhados = Object.keys(res).filter(function (L) {
+    return res[L].data >= desde && res[L].estado === 'falhou';
+  });
+  return { planeados: dias.length, feitos: feitos, maximosFalhados: falhados };
+}
+
+function sugerirDieta(dados, hoje) {
+  var perfil = dados.perfil, meta = dados.meta;
+  if (!perfil || !meta) return [];
+  var obj = OBJETIVOS[perfil.objetivo];
+  var sug = [];
+  var semana = diasComComida(dados.comidas, _somarDias(hoje, -1), 7);
+  var peso = pesoMedio(dados.pesagens, hoje, 7) || dados.pesoAtual;
+
+  // 0. o gasto medido chegou e a meta ainda e da formula
+  if (dados.medido && meta.origem === 'formula' && Number.isFinite(meta.gasto) &&
+      Math.abs(dados.medido.gasto - meta.gasto) >= 100) {
+    var nova = metaDeMacros(perfil, peso, dados.medido.gasto);
+    sug.push({
+      tipo: 'dieta-medido', chave: 'dieta-medido|' + segundaDaSemana(hoje),
+      titulo: 'Meta pelo teu gasto medido: ' + num_(meta.kcal) + ' → ' + num_(nova.kcal) + ' kcal',
+      detalhe: 'Em ' + dados.medido.diasComida + ' dias comeste em média ' + num_(dados.medido.kcalMedia) +
+        ' kcal e o peso ' + (dados.medido.tendencia.kgSemana >= 0 ? 'subiu ' : 'desceu ') +
+        num_(Math.abs(dados.medido.tendencia.kgSemana)) + ' kg/semana: gastas ~' + num_(dados.medido.gasto) +
+        ' kcal. A fórmula dizia ' + num_(meta.gasto) + '.',
+      novaMeta: nova
+    });
+    return sug.filter(function (s) { return !(dados.decididas || {})[s.chave]; });
+  }
+
+  // 1. ritmo do peso contra o objetivo (so com a comida registada a serio)
+  var t = tendenciaPeso(dados.pesagens, hoje, 21);
+  if (t && semana.length >= 4) {
+    var diferenca = obj.ritmo - t.kgSemana;
+    var ajuste = Math.max(-300, Math.min(300, _arredondar(diferenca * KCAL_POR_KG / 7, 50)));
+    if (Math.abs(diferenca) >= 0.15 && ajuste !== 0) {
+      sug.push({
+        tipo: 'dieta-kcal', chave: 'dieta-kcal|' + segundaDaSemana(hoje),
+        titulo: (ajuste > 0 ? '+' : '') + ajuste + ' kcal por dia (' + num_(meta.kcal) + ' → ' + num_(meta.kcal + ajuste) + ')',
+        detalhe: 'O peso está a ' + (t.kgSemana >= 0 ? 'subir ' : 'descer ') + num_(Math.abs(t.kgSemana)) +
+          ' kg/semana (' + t.pesagens + ' pesagens em ' + t.dias + ' dias); para "' + obj.nome.toLowerCase() +
+          '" o alvo é ' + (obj.ritmo >= 0 ? '+' : '') + num_(obj.ritmo) + ' kg/semana.',
+        novaMeta: macrosParaKcal(meta.kcal + ajuste, peso, perfil.objetivo)
+      });
+    }
+  }
+
+  // 2. proteina media da semana
+  if (semana.length >= 4) {
+    var pMedia = semana.reduce(function (s, d) { return s + d.p; }, 0) / semana.length;
+    if (pMedia < meta.p * 0.85) {
+      var falta = Math.round(meta.p - pMedia);
+      sug.push({
+        tipo: 'dieta-proteina', chave: 'dieta-proteina|' + segundaDaSemana(hoje),
+        titulo: 'Mais ' + falta + ' g de proteína por dia',
+        detalhe: 'Média dos últimos ' + semana.length + ' dias: ' + Math.round(pMedia) + ' g (' +
+          num_(pMedia / peso) + ' g/kg). A meta é ' + meta.p + ' g. ' + falta + ' g são ~' +
+          Math.round(falta / 0.241) + ' g de peito de frango cru ou ~' + Math.round(falta / 0.1) + ' g de iogurte grego magro.',
+        informativa: true
+      });
+    }
+  }
+
+  // 3 e 4. a avaliacao da semana
+  var av = dados.avaliacoes.filter(function (a) { return a.data > _somarDias(hoje, -7); })
+    .sort(function (a, b) { return a.data < b.data ? 1 : -1; })[0];
+  if (av) {
+    var emDefice = meta.kcal < (dados.gasto || meta.kcal) - 100 || perfil.objetivo === 'perder';
+    if (av.fome >= 4 && emDefice) {
+      sug.push({
+        tipo: 'dieta-fome', chave: 'dieta-fome|' + av.data,
+        titulo: 'Fome ' + av.fome + '/5: mesmas kcal, mais volume',
+        detalhe: 'Troca ~' + Math.round(meta.h * 0.15) + ' g de hidratos densos (pão, arroz) por legumes e ' +
+          'fruta, e reparte a proteína por 4 refeições. As kcal ficam iguais.',
+        informativa: true
+      });
+    }
+    var treinoMau = dados.treino && (dados.treino.maximosFalhados.length > 0 ||
+      (dados.treino.planeados >= 3 && dados.treino.feitos / dados.treino.planeados < 0.75));
+    if ((av.energia <= 2 || av.sono <= 2) && emDefice && treinoMau) {
+      sug.push({
+        tipo: 'dieta-energia', chave: 'dieta-energia|' + av.data,
+        titulo: '+150 kcal: energia ' + av.energia + '/5 e o treino a ressentir-se',
+        detalhe: (dados.treino.maximosFalhados.length ? 'Falhaste os máximos de ' +
+          dados.treino.maximosFalhados.join(', ').toLowerCase() + '. ' : '') + 'Treinos feitos: ' +
+          dados.treino.feitos + ' de ' + dados.treino.planeados + '. Sono ' + av.sono + '/5.',
+        novaMeta: macrosParaKcal(meta.kcal + 150, peso, perfil.objetivo)
+      });
+    }
+  }
+  return sug.filter(function (s) { return !(dados.decididas || {})[s.chave]; });
+}
+
 /* ---------------------------------------------------------------------------
    Backup: as lojas que vao e vem, e juntar sem apagar
 
@@ -6654,7 +6856,22 @@ function renderComida() {
       (alvo ? ' / ' + num(alvo, 0) + unidade : '') + '</div></div>';
   }
 
-  var html = '<div class="linha entre" style="margin-bottom:10px">' +
+  var dieta = dadosDieta();
+  var sugDieta = sugerirDieta(dieta, hojeIso());
+  var ultimaAv = Estado.avaliacoes.slice().sort(function (a, b) { return a.data < b.data ? 1 : -1; })[0];
+  var avPendente = !ultimaAv || diasEntre(ultimaAv.data, hojeIso()) >= 7;
+
+  var html = (sugDieta.length ? '<div class="lista"><div class="cab">' +
+      plural(sugDieta.length, 'sugestão', 'sugestões') + ' para a dieta</div>' +
+      sugDieta.map(function (s, i) {
+        return '<div class="item" style="display:block"><div style="font-weight:600">' + esc(s.titulo) + '</div>' +
+          '<div class="mini fraco" style="margin:3px 0 10px">' + esc(s.detalhe) + '</div>' +
+          '<div class="linha" style="gap:8px">' +
+          '<button class="btn primaria fina crescer" data-dtaceitar="' + i + '">' +
+            (s.novaMeta ? 'Aceitar' : 'Ok') + '</button>' +
+          '<button class="btn fina crescer" data-dtignorar="' + i + '">Ignorar</button></div></div>';
+      }).join('') + '</div>' : '') +
+    '<div class="linha entre" style="margin-bottom:10px">' +
     '<button class="btn fina" id="cmAntes" aria-label="dia anterior">&#8249;</button>' +
     '<div class="centro" style="font-weight:700">' + esc(data === hojeIso() ? 'Hoje' : dataLonga(data)) + '</div>' +
     '<button class="btn fina" id="cmDepois" aria-label="dia seguinte">&#8250;</button></div>' +
@@ -6663,7 +6880,17 @@ function renderComida() {
       caixa(t.total.p, 'proteína', meta && meta.p, ' g') +
       caixa(t.total.h, 'hidratos', meta && meta.h, ' g') +
       caixa(t.total.g, 'gordura', meta && meta.g, ' g') +
-    '</div></div>';
+    '</div>' +
+    (meta
+      ? '<p class="mini fraco" style="margin:10px 0 0">' + esc(OBJETIVOS[dieta.perfil.objetivo].nome) + ' · ' +
+        (meta.origem === 'medido' ? 'gasto medido nos teus dados' : meta.origem === 'ajuste' ? 'ajustada por sugestão' :
+          'gasto pela fórmula') + ' · <button class="mini" id="cmMeta" style="color:var(--azul)">mudar</button></p>'
+      : '<button class="btn primaria larga fina" id="cmMeta" style="margin-top:12px">Definir objetivo e meta</button>') +
+    '</div>' +
+    (meta ? '<button class="btn larga fina" id="cmAval" style="margin-bottom:12px' +
+      (avPendente ? ';color:var(--azul)' : '') + '">' +
+      (avPendente ? 'Avaliação da semana (2 min) &#8250;' : 'Avaliação feita a ' + esc(dataCurta(ultimaAv.data))) +
+      '</button>' : '');
 
   REFEICOES.forEach(function (r) {
     var pr = t.porRefeicao[r];
@@ -6694,6 +6921,23 @@ function renderComida() {
   $('#cmAntes').onclick = function () { Estado.dataComida = _somarDias(data, -1); render(); };
   $('#cmDepois').onclick = function () { Estado.dataComida = _somarDias(data, 1); render(); };
   $('#cmPeso').onclick = function () { trocarVista('peso'); };
+  $('#cmMeta').onclick = editarPerfilDieta;
+  if ($('#cmAval')) $('#cmAval').onclick = avaliacaoSemanal;
+  Array.prototype.forEach.call(document.querySelectorAll('[data-dtaceitar]'), function (b) {
+    b.onclick = function () {
+      var s = sugDieta[+b.dataset.dtaceitar];
+      var passo = s.novaMeta
+        ? guardarDefinicao('metaMacros', Object.assign({}, s.novaMeta, { origem: 'ajuste', data: hojeIso() }))
+        : Promise.resolve();
+      passo.then(function () { return decidirSugestao(s, 'aceite'); }).then(function () {
+        avisar(s.novaMeta ? 'Meta nova: ' + s.novaMeta.kcal + ' kcal' : 'Anotado');
+        render();
+      });
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-dtignorar]'), function (b) {
+    b.onclick = function () { decidirSugestao(sugDieta[+b.dataset.dtignorar], 'ignorada').then(render); };
+  });
   if ($('#cmCopiar')) $('#cmCopiar').onclick = function () {
     gravarComidas(copiarComidas(Estado.comidas, ontem, data)).then(function (n) { avisar(n + ' registos copiados'); });
   };
@@ -6708,6 +6952,138 @@ function renderComida() {
   });
 
   if (!Insa.lista) carregarInsa().then(function () { if (Estado.vista === 'comida') render(); }).catch(function () {});
+}
+
+/* --- Meta, perfil e avaliacao --------------------------------------------- */
+
+function pesoAtual() {
+  var p = Estado.pesagens.slice().sort(function (a, b) { return a.data < b.data ? 1 : -1; })[0];
+  return p ? p.kg : null;
+}
+
+function dadosDieta() {
+  var hoje = hojeIso();
+  var decididas = {};
+  Estado.sugestoes.forEach(function (s) { decididas[s.chave] = 1; });
+  var treino = null;
+  try { treino = resumoTreinoSemana(ciclosDoPlano(), Estado.sessoes, Estado.series, Estado.exercicios, hoje); }
+  catch (e) { console.warn('Resumo do treino:', e.message); }
+  var medido = gastoMedido(Estado.pesagens, Estado.comidas, _somarDias(hoje, -1));
+  return {
+    perfil: Estado.definicoes.perfilDieta || null, meta: Estado.definicoes.metaMacros || null,
+    pesoAtual: pesoAtual(), pesagens: Estado.pesagens, comidas: Estado.comidas,
+    avaliacoes: Estado.avaliacoes, treino: treino, decididas: decididas,
+    gasto: medido ? medido.gasto : null, medido: medido
+  };
+}
+
+function editarPerfilDieta() {
+  var p = Object.assign({ idade: '', altura: '', sexo: 'M', atividade: 'moderado', objetivo: 'manter' },
+    Estado.definicoes.perfilDieta || {});
+  var peso = pesoMedio(Estado.pesagens, hojeIso(), 7) || pesoAtual();
+  function opcoes(mapa, atual) {
+    return Object.keys(mapa).map(function (k) {
+      return '<option value="' + k + '"' + (k === atual ? ' selected' : '') + '>' + esc(mapa[k].nome) + '</option>';
+    }).join('');
+  }
+  abrirFolha('Objetivo e meta', '<div id="pdCorpo"></div>', function (c) {
+    var corpo = c.querySelector('#pdCorpo');
+    corpo.innerHTML = (peso ? '' : '<p class="mini" style="color:var(--ambar);margin-top:0">Sem pesagens: regista o ' +
+        'peso primeiro (Peso corporal).</p>') +
+      '<label class="campo"><span>Objetivo</span><select id="pdObj">' + opcoes(OBJETIVOS, p.objetivo) + '</select></label>' +
+      '<div class="linha" style="gap:8px;margin-bottom:14px">' +
+        '<label class="campo crescer" style="margin:0"><span>Idade</span><input id="pdIdade" type="number" inputmode="numeric" value="' + p.idade + '"></label>' +
+        '<label class="campo crescer" style="margin:0"><span>Altura (cm)</span><input id="pdAltura" type="number" inputmode="numeric" value="' + p.altura + '"></label>' +
+        '<label class="campo crescer" style="margin:0"><span>Sexo</span><select id="pdSexo"><option value="M"' +
+          (p.sexo === 'M' ? ' selected' : '') + '>M</option><option value="F"' + (p.sexo === 'F' ? ' selected' : '') +
+          '>F</option></select></label></div>' +
+      '<label class="campo"><span>Atividade (com os treinos)</span><select id="pdAtiv">' + opcoes(ATIVIDADES, p.atividade) + '</select></label>' +
+      '<div class="cartao" style="margin-top:0" id="pdResultado"></div>' +
+      '<button class="btn primaria larga" id="pdOk">Guardar esta meta</button>';
+    var calc = null;
+    function ler() {
+      return { objetivo: corpo.querySelector('#pdObj').value, idade: +corpo.querySelector('#pdIdade').value,
+        altura: +corpo.querySelector('#pdAltura').value, sexo: corpo.querySelector('#pdSexo').value,
+        atividade: corpo.querySelector('#pdAtiv').value };
+    }
+    function atualizar() {
+      var novo = ler();
+      var r = corpo.querySelector('#pdResultado');
+      if (!peso || !(novo.idade > 10) || !(novo.altura > 100)) {
+        calc = null;
+        r.innerHTML = '<p class="mini fraco" style="margin:0">Preenche idade e altura.</p>';
+        return;
+      }
+      var formula = gastoPorFormula(novo, peso);
+      var medido = gastoMedido(Estado.pesagens, Estado.comidas, _somarDias(hojeIso(), -1));
+      var gasto = medido ? medido.gasto : formula;
+      var m = metaDeMacros(novo, peso, gasto);
+      calc = { perfil: novo, meta: Object.assign(m, { origem: medido ? 'medido' : 'formula', data: hojeIso(), gasto: gasto }) };
+      r.innerHTML = '<div class="linha entre">' +
+        [[m.kcal, 'kcal'], [m.p, 'proteína'], [m.h, 'hidratos'], [m.g, 'gordura']].map(function (x) {
+          return '<div class="centro crescer"><div style="font-weight:700;font-size:19px" class="nums">' + x[0] +
+            '</div><div class="mini fraco">' + x[1] + '</div></div>';
+        }).join('') + '</div><p class="mini fraco" style="margin:10px 0 0">Peso ' + num(peso) + ' kg. Gasto pela fórmula: ' +
+        formula + ' kcal' + (medido ? '; medido nos teus ' + medido.diasComida + ' dias de comida e pesagens: <b>' +
+          medido.gasto + ' kcal</b> (usa-se este)' : '; com 14+ dias de comida registada e pesagens passa a ser medido') + '.</p>';
+    }
+    Array.prototype.forEach.call(corpo.querySelectorAll('input,select'), function (i) { i.oninput = i.onchange = atualizar; });
+    atualizar();
+    corpo.querySelector('#pdOk').onclick = function () {
+      if (!calc) { avisar('Faltam dados'); return; }
+      guardarDefinicao('perfilDieta', calc.perfil)
+        .then(function () { return guardarDefinicao('metaMacros', calc.meta); })
+        .then(function () { fecharFolha(); avisar('Meta: ' + calc.meta.kcal + ' kcal'); render(); });
+    };
+  });
+}
+
+function avaliacaoSemanal() {
+  var hoje = hojeIso();
+  var peso = pesoMedio(Estado.pesagens, hoje, 7);
+  var treino = dadosDieta().treino;
+  var escolhas = { fome: 3, energia: 3, sono: 3 };
+  function escala(chave, rotulo, baixo, alto) {
+    return '<div style="margin-bottom:14px"><div class="mini fraco" style="margin-bottom:6px">' + rotulo +
+      ' <span style="float:right">1 ' + baixo + ' · 5 ' + alto + '</span></div><div class="selseg">' +
+      [1, 2, 3, 4, 5].map(function (n) {
+        return '<button data-av="' + chave + '" data-n="' + n + '"' + (escolhas[chave] === n ? ' class="on"' : '') + '>' + n + '</button>';
+      }).join('') + '</div></div>';
+  }
+  abrirFolha('Avaliação da semana', '<div id="avCorpo"></div>', function (c) {
+    var corpo = c.querySelector('#avCorpo');
+    function desenhar() {
+      var cintura = corpo.querySelector('#avCintura') ? corpo.querySelector('#avCintura').value : '';
+      corpo.innerHTML = '<div class="cartao" style="margin-top:0"><div class="linha entre pequeno"><span>Peso médio (7 dias)</span><b>' +
+          (peso ? num(peso) + ' kg' : 'sem pesagens') + '</b></div>' +
+          (treino && treino.planeados ? '<div class="linha entre pequeno" style="margin-top:6px"><span>Treinos do plano</span><b>' + treino.feitos +
+            ' de ' + treino.planeados + '</b></div>' +
+            (treino.maximosFalhados.length ? '<div class="mini" style="color:var(--ambar);margin-top:4px">Máximos falhados: ' +
+              treino.maximosFalhados.join(', ').toLowerCase() + '</div>' : '') : '') + '</div>' +
+        escala('fome', 'Fome', 'nenhuma', 'sempre') +
+        escala('energia', 'Energia', 'de rastos', 'ótima') +
+        escala('sono', 'Sono', 'mau', 'ótimo') +
+        '<label class="campo"><span>Cintura (cm, opcional)</span><input id="avCintura" type="number" inputmode="decimal" value="' +
+          esc(cintura) + '"></label>' +
+        '<button class="btn primaria larga" id="avOk">Guardar</button>';
+      Array.prototype.forEach.call(corpo.querySelectorAll('[data-av]'), function (b) {
+        b.onclick = function () { escolhas[b.dataset.av] = +b.dataset.n; desenhar(); };
+      });
+      corpo.querySelector('#avOk').onclick = function () {
+        var cm = +corpo.querySelector('#avCintura').value;
+        var reg = { data: hoje, pesoMedio: peso, cintura: cm > 0 ? cm : null, fome: escolhas.fome,
+          energia: escolhas.energia, sono: escolhas.sono, treino: treino };
+        reg.id = proximoId(Estado.avaliacoes);
+        BD.guardar('avaliacoes', reg).then(function () {
+          Estado.avaliacoes.push(reg);
+          fecharFolha();
+          avisar('Avaliação guardada');
+          render();
+        });
+      };
+    }
+    desenhar();
+  });
 }
 
 function gravarComidas(novas) {
