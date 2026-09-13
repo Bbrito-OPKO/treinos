@@ -150,6 +150,7 @@ a{color:var(--azul)}
 .btn.verde{background:var(--verde);color:#04240f}
 .btn.perigo{background:rgba(239,68,68,.14);color:var(--vermelho)}
 .btn.larga{width:100%}
+.btn:disabled{opacity:.4}
 .btn.fina{min-height:40px;font-size:15px;padding:0 14px}
 .btn[disabled]{opacity:.35;pointer-events:none}
 
@@ -456,6 +457,15 @@ a{color:var(--azul)}
   <!-- ===================== DEFINICOES ===================== -->
   <section class="vista" id="v-definicoes"></section>
 
+  <!-- ===================== PLANO ===================== -->
+  <section class="vista" id="v-plano"></section>
+
+  <!-- ===================== COMIDA ===================== -->
+  <section class="vista" id="v-comida"></section>
+
+  <!-- ===================== MAIS ===================== -->
+  <section class="vista" id="v-mais"></section>
+
 </main>
 
 <!-- Cronometro de descanso -->
@@ -472,25 +482,21 @@ a{color:var(--azul)}
     <svg viewBox="0 0 24 24"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/></svg>
     Treino
   </button>
-  <button data-vista="historico">
-    <svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="16" rx="2.5"/><path d="M3.5 9.5h17M8 3v3M16 3v3"/></svg>
-    Histórico
+  <button data-vista="plano">
+    <svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="16" rx="2.5"/><path d="M3.5 9.5h17M8 3v3M16 3v3M7.5 13.5h3M7.5 17h6"/></svg>
+    Plano
+  </button>
+  <button data-vista="comida">
+    <svg viewBox="0 0 24 24"><path d="M7 3v7a2 2 0 0 0 2 2v9M11 3v7a2 2 0 0 1-2 2M9 3v6M17 21V3c-2 1-3 4-3 8h3"/></svg>
+    Comida
   </button>
   <button data-vista="analises">
     <svg viewBox="0 0 24 24"><path d="M4 19.5V11M9.3 19.5V5M14.7 19.5v-6M20 19.5V8"/></svg>
     Análises
   </button>
-  <button data-vista="peso">
-    <svg viewBox="0 0 24 24"><path d="M6.2 8.5h11.6l2.2 11.5a1 1 0 0 1-1 1.2H5a1 1 0 0 1-1-1.2z"/><circle cx="12" cy="5.2" r="2.6"/></svg>
-    Peso
-  </button>
-  <button data-vista="exercicios">
-    <svg viewBox="0 0 24 24"><path d="M4 6.5h16M4 12h16M4 17.5h16"/><circle cx="8" cy="6.5" r="1.6" fill="currentColor" stroke="none"/><circle cx="14" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="10" cy="17.5" r="1.6" fill="currentColor" stroke="none"/></svg>
-    Exercícios
-  </button>
-  <button data-vista="definicoes">
-    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.1"/><path d="M19.4 15a1.6 1.6 0 0 0 .32 1.77l.06.06a1.9 1.9 0 1 1-2.7 2.7l-.05-.06a1.6 1.6 0 0 0-1.78-.32 1.6 1.6 0 0 0-1 1.46V21a1.9 1.9 0 1 1-3.8 0v-.1A1.6 1.6 0 0 0 9.4 19.4a1.6 1.6 0 0 0-1.77.32l-.06.06a1.9 1.9 0 1 1-2.7-2.7l.06-.06a1.6 1.6 0 0 0 .32-1.77 1.6 1.6 0 0 0-1.46-1H3.3a1.9 1.9 0 1 1 0-3.8h.1a1.6 1.6 0 0 0 1.46-1.05 1.6 1.6 0 0 0-.32-1.77l-.06-.06a1.9 1.9 0 1 1 2.7-2.7l.06.06a1.6 1.6 0 0 0 1.77.32h.08a1.6 1.6 0 0 0 1-1.46V3.3a1.9 1.9 0 1 1 3.8 0v.1a1.6 1.6 0 0 0 1 1.46 1.6 1.6 0 0 0 1.77-.32l.06-.06a1.9 1.9 0 1 1 2.7 2.7l-.06.06a1.6 1.6 0 0 0-.32 1.77v.08a1.6 1.6 0 0 0 1.46 1H21a1.9 1.9 0 1 1 0 3.8h-.1a1.6 1.6 0 0 0-1.46 1z"/></svg>
-    Definições
+  <button data-vista="mais">
+    <svg viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg>
+    Mais
   </button>
 </nav>
 
@@ -2097,6 +2103,28 @@ function gerarPlano(cfg) {
     volume_alvo_semanal: _copia(cfg.alvo),
     calendario: calendario
   };
+}
+
+/* O ciclo seguinte: cada lift sobe o seu incremento e TODAS as series dele
+   sobem na mesma proporcao, arredondadas a 2,5 kg. O single dos maximos fica
+   exatamente no maximo novo. Os ajustes a mao eram de semanas concretas do
+   ciclo anterior, por isso nao passam. Os pesos dos acessorios ficam — e a
+   fase das adaptacoes que os vai buscar ao que foi registado. */
+function progredirConfig(cfg, novaDataInicio, hoje) {
+  var novo = _copia(cfg);
+  novo.dataInicio = novaDataInicio;
+  novo.criado = hoje;
+  novo.ajustes = {};
+  novo.lifts.forEach(function (L) {
+    var l = novo.lift[L], antes = l.max, depois = antes + l.inc;
+    ['maximos', 'volume_5', 'volume_8', 'leve'].forEach(function (m) {
+      l[m] = l[m].map(function (s) {
+        return [arredondarPy(s[0] * depois / antes / 2.5) * 2.5, s[1]];
+      });
+    });
+    l.max = depois;
+  });
+  return novo;
 }
 
 /* ---------------------------------------------------------------------------
@@ -6024,6 +6052,268 @@ function csvCampo(valor) {
 }
 
 /* ===========================================================================
+   Vista: Mais
+
+   O que saiu da barra quando entraram o Plano e a Comida. Cada ecra continua
+   igual; so muda a porta por onde se entra.
+   ======================================================================== */
+
+function renderMais() {
+  $('#titulo').textContent = 'Mais';
+  $('#btVoltar').hidden = true;
+  $('#btAcao').hidden = true;
+  var itens = [
+    ['historico', 'Histórico', 'Calendário e treinos de cada dia'],
+    ['exercicios', 'Exercícios', 'Grupos, fichas e recordes'],
+    ['definicoes', 'Definições', 'Backup, descanso, ecrã, versão']
+  ];
+  $('#v-mais').innerHTML = '<div class="lista">' + itens.map(function (i) {
+    return '<button class="item" data-mais="' + i[0] + '"><div class="crescer">' +
+      '<div style="font-weight:600">' + i[1] + '</div><div class="mini fraco">' + i[2] + '</div></div>' +
+      '<span class="seta">&#8250;</span></button>';
+  }).join('') + '</div>';
+  Array.prototype.forEach.call(document.querySelectorAll('[data-mais]'), function (b) {
+    b.onclick = function () { trocarVista(b.dataset.mais); };
+  });
+}
+
+/* ===========================================================================
+   Vista: Comida
+
+   Por agora e o peso corporal. O registo do que se come chega na fase da
+   alimentacao; o separador ja existe para a barra nao mudar outra vez.
+   ======================================================================== */
+
+function renderComida() {
+  $('#titulo').textContent = 'Comida';
+  $('#btVoltar').hidden = true;
+  $('#btAcao').hidden = true;
+  $('#v-comida').innerHTML =
+    '<p class="mini fraco" style="margin:0 0 12px">O registo das refeições e os macros ' +
+    'chegam na próxima fase. Para já, o peso corporal está aqui.</p><div id="comidaPeso"></div>';
+  analisePeso($('#comidaPeso'));
+}
+
+/* ===========================================================================
+   Vista: Plano
+
+   O ciclo de 4 semanas, dia a dia, com o que ja foi feito. E daqui que sai o
+   ciclo seguinte: gera-se, passa pelas 17 provas, e so entao se grava no
+   Treino. Um plano que falhe uma prova nao se grava.
+
+   Os ciclos ficam em definicoes.planoCiclos: [{ dataInicio, cfg, gravado }].
+   Quem ainda nao tem nenhum esta no ciclo 1, que entrou pelo para_app.py com
+   a configuracao de partida.
+   ======================================================================== */
+
+var NOME_DIA_CURTO = { segunda: 'Seg', terca: 'Ter', quinta: 'Qui', sexta: 'Sex' };
+var NOME_MODO = { maximos: 'máximos', volume_8: 'médio', volume_5: 'pesado', leve: 'leve' };
+
+function ciclosDoPlano() {
+  var c = Estado.definicoes.planoCiclos;
+  if (Array.isArray(c) && c.length) return c;
+  return [{ dataInicio: PLANO_CONFIG_PADRAO.dataInicio, cfg: PLANO_CONFIG_PADRAO, gravado: null }];
+}
+
+function cicloAtual() {
+  var ciclos = ciclosDoPlano(), hoje = hojeIso(), atual = ciclos[0];
+  ciclos.forEach(function (c) { if (c.dataInicio <= hoje) atual = c; });
+  return { ciclo: atual, numero: ciclos.indexOf(atual) + 1, total: ciclos.length };
+}
+
+/* Quantas series do dia estao feitas e quantas ha. */
+function estadoDoDia(data) {
+  var doDia = Estado.series.filter(function (s) { return s.data === data; });
+  return { total: doDia.length, feitas: doDia.filter(serieFeita).length };
+}
+
+function renderPlano() {
+  $('#titulo').textContent = 'Plano';
+  $('#btVoltar').hidden = true;
+  $('#btAcao').hidden = true;
+
+  var ca = cicloAtual();
+  var plano = gerarPlano(ca.ciclo.cfg);
+  var cal = plano.calendario;
+  var ultimo = cal[3].dias.sexta.data;
+  var hoje = hojeIso();
+
+  var html = '<div class="cartao" style="margin-top:0"><div class="linha entre">' +
+    '<div><div style="font-size:20px;font-weight:700">Ciclo ' + ca.numero + '</div>' +
+    '<div class="mini fraco">' + esc(dataCurta(cal[0].inicio)) + ' a ' + esc(dataCurta(ultimo)) + '</div></div>' +
+    '<button class="btn primaria fina" id="plSeguinte">Ciclo seguinte</button></div>' +
+    '<div class="linha" style="gap:8px;flex-wrap:wrap;margin-top:12px">' +
+    ca.ciclo.cfg.lifts.map(function (L) {
+      return '<span class="etiqueta">' + esc(ca.ciclo.cfg.nomeLift[L]) + ' ' +
+        num(ca.ciclo.cfg.lift[L].max) + '</span>';
+    }).join('') + '</div></div>';
+
+  cal.forEach(function (sem) {
+    html += '<div class="lista"><div class="cab">Semana ' + sem.semana + ' · máximos: ' +
+      esc(ca.ciclo.cfg.nomeLift[sem.maximos].toLowerCase()) + '</div>';
+    PLANO_DIAS.forEach(function (d) {
+      var dia = sem.dias[d];
+      var est = estadoDoDia(dia.data);
+      var marca;
+      if (est.total && est.feitas === est.total) marca = '<span class="etiqueta" style="color:var(--verde)">feito</span>';
+      else if (est.feitas) marca = '<span class="etiqueta">' + est.feitas + '/' + est.total + '</span>';
+      else if (dia.data < hoje) marca = '<span class="etiqueta" style="color:var(--ambar)">falhou</span>';
+      else if (!est.total) marca = '<span class="etiqueta">sem treino</span>';
+      else marca = '<span class="etiqueta">' + est.total + ' séries</span>';
+      html += '<button class="item" data-pldia="' + dia.data + '"' +
+        (dia.data === hoje ? ' style="background:var(--sup2)"' : '') + '>' +
+        '<div style="width:56px;flex:none"><div style="font-weight:700">' + NOME_DIA_CURTO[d] + '</div>' +
+        '<div class="mini fraco">' + esc(dataCurta(dia.data)) + '</div></div>' +
+        '<div class="crescer"><div style="font-weight:600">' + esc(ca.ciclo.cfg.nomeLift[dia.lift]) + '</div>' +
+        '<div class="mini fraco">' + NOME_MODO[dia.modo] + ' · ' +
+        plural(dia.exercicios.length, 'exercício', 'exercícios') + '</div></div>' +
+        marca + '<span class="seta">&#8250;</span></button>';
+    });
+    html += '</div>';
+  });
+
+  if (ca.numero < ca.total) {
+    var prox = ciclosDoPlano()[ca.numero];
+    html += '<p class="mini fraco">O ciclo ' + (ca.numero + 1) + ' já está gravado e começa a ' +
+      esc(dataLonga(prox.dataInicio)) + '.</p>';
+  }
+
+  $('#v-plano').innerHTML = html;
+  $('#plSeguinte').onclick = prepararCicloSeguinte;
+  Array.prototype.forEach.call(document.querySelectorAll('[data-pldia]'), function (b) {
+    b.onclick = function () {
+      Estado.dataAtual = b.dataset.pldia;
+      trocarVista('treino');
+    };
+  });
+}
+
+/* Folha do ciclo seguinte: data, maximos novos, e as 17 provas. Tocar num
+   exercicio tira-o daquele dia (fica nos ajustes) e o plano refaz-se. */
+function prepararCicloSeguinte() {
+  var ciclos = ciclosDoPlano();
+  var ultimo = ciclos[ciclos.length - 1];
+  var cfg = progredirConfig(ultimo.cfg, _somarDias(ultimo.dataInicio, 28), hojeIso());
+  var aberto = null;   // 'semana|dia' expandido na lista
+
+  function desenhar(corpo) {
+    var plano, erro = null, falhas = [];
+    try { plano = gerarPlano(cfg); falhas = validarPlano(plano); }
+    catch (e) { erro = e.message; }
+
+    var html = '<label class="campo"><span>Começa na segunda</span>' +
+      '<input id="csData" type="date" value="' + cfg.dataInicio + '"></label>' +
+      '<div class="cartao" style="margin-top:0"><h3>Máximos deste ciclo</h3>' +
+      cfg.lifts.map(function (L) {
+        return '<div class="linha entre pequeno" style="padding:3px 0"><span>' + esc(cfg.nomeLift[L]) +
+          '</span><span class="nums">' + num(ultimo.cfg.lift[L].max) + ' → <b>' + num(cfg.lift[L].max) +
+          '</b> kg</span></div>';
+      }).join('') + '</div>';
+
+    if (erro) {
+      html += '<p style="color:var(--vermelho)">Não consegui gerar: ' + esc(erro) + '</p>';
+    } else {
+      html += falhas.length
+        ? '<div class="cartao" style="border-color:var(--vermelho)"><h3 style="color:var(--vermelho)">' +
+          falhas.length + ' regra(s) falham — não se grava</h3>' +
+          falhas.slice(0, 8).map(function (f) { return '<div class="mini">' + esc(f) + '</div>'; }).join('') + '</div>'
+        : '<p class="mini" style="color:var(--verde);margin:0 0 10px">As 17 regras passam.</p>';
+      html += '<p class="mini fraco" style="margin:0 0 8px">Toca num dia para ver os exercícios. ' +
+        'Tocar num exercício tira-o desse dia e o plano refaz-se.</p>';
+      plano.calendario.forEach(function (sem) {
+        html += '<div class="lista"><div class="cab">Semana ' + sem.semana + '</div>';
+        PLANO_DIAS.forEach(function (d) {
+          var dia = sem.dias[d], chave = sem.semana + '|' + d;
+          html += '<button class="item" data-csdia="' + chave + '"><div class="crescer">' +
+            '<b>' + NOME_DIA_CURTO[d] + ' ' + esc(dataCurta(dia.data)) + '</b> · ' +
+            esc(cfg.nomeLift[dia.lift]) + ' <span class="mini fraco">' + NOME_MODO[dia.modo] + '</span></div>' +
+            '<span class="seta">' + (aberto === chave ? '&#8964;' : '&#8250;') + '</span></button>';
+          if (aberto === chave) {
+            var fora = (cfg.ajustes[chave] && cfg.ajustes[chave].fora) || [];
+            dia.exercicios.forEach(function (e) {
+              html += '<button class="item" ' + (e.foco ? 'disabled' : 'data-csex="' + esc(e.nome) + '"') +
+                ' style="padding-left:28px"><div class="crescer mini">' + esc(e.nome) +
+                ' <span class="fraco">' + e.series.map(function (s) { return num(s[0]) + '×' + s[1]; }).join(' · ') +
+                '</span></div>' + (e.foco ? '' : '<span class="fraco">&times;</span>') + '</button>';
+            });
+            if (fora.length) {
+              html += '<div class="item mini" style="padding-left:28px;color:var(--ambar)">Tirados: ' +
+                fora.map(esc).join(', ') + ' <button class="btn fina" data-csrepor="' + chave +
+                '" style="margin-left:auto">Repor</button></div>';
+            }
+          }
+        });
+        html += '</div>';
+      });
+    }
+    html += '<button class="btn primaria larga" id="csGravar"' + (erro || falhas.length ? ' disabled' : '') +
+      '>Gravar no Treino</button>' +
+      '<p class="mini fraco" style="margin-top:10px">As séries entram por fazer, como no ciclo 1. ' +
+      'Dias que já têm treino ficam como estão.</p>';
+    corpo.innerHTML = html;
+
+    corpo.querySelector('#csData').onchange = function (e) {
+      var v = e.target.value;
+      if (!v) return;
+      // o plano assume que a semana comeca a segunda
+      cfg.dataInicio = segundaDaSemana(v);
+      desenhar(corpo);
+    };
+    Array.prototype.forEach.call(corpo.querySelectorAll('[data-csdia]'), function (b) {
+      b.onclick = function () { aberto = aberto === b.dataset.csdia ? null : b.dataset.csdia; desenhar(corpo); };
+    });
+    Array.prototype.forEach.call(corpo.querySelectorAll('[data-csex]'), function (b) {
+      b.onclick = function () {
+        var aj = cfg.ajustes[aberto] = cfg.ajustes[aberto] || {};
+        aj.fora = (aj.fora || []).concat([b.dataset.csex]);
+        desenhar(corpo);
+      };
+    });
+    Array.prototype.forEach.call(corpo.querySelectorAll('[data-csrepor]'), function (b) {
+      b.onclick = function (ev) {
+        ev.stopPropagation();
+        delete cfg.ajustes[b.dataset.csrepor];
+        desenhar(corpo);
+      };
+    });
+    var gravar = corpo.querySelector('#csGravar');
+    if (!gravar.disabled) gravar.onclick = function () { gravarCiclo(cfg, plano); };
+  }
+
+  abrirFolha('Ciclo ' + (ciclos.length + 1), '<div id="csCorpo"></div>', function (c) {
+    desenhar(c.querySelector('#csCorpo'));
+  });
+}
+
+function gravarCiclo(cfg, plano) {
+  if (ciclosDoPlano().some(function (c) { return c.dataInicio === cfg.dataInicio; })) {
+    avisar('Já há um ciclo a começar a ' + dataCurta(cfg.dataInicio));
+    return;
+  }
+  var r = planoParaSessoes(plano, Estado.exercicios, Estado.sessoes,
+    { sessao: proximoId(Estado.sessoes), serie: proximoId(Estado.series) });
+  if (r.emFalta.length) {
+    avisar('Faltam exercícios na app: ' + r.emFalta.join(', ') + '. Nada foi gravado.');
+    return;
+  }
+  var ciclos = ciclosDoPlano().concat([{ dataInicio: cfg.dataInicio, cfg: cfg, gravado: hojeIso() }]);
+  avisar('A gravar…');
+  BD.guardarMuitos('sessoes', r.sessoes)
+    .then(function () { return BD.guardarMuitos('series', r.series); })
+    .then(function () { return guardarDefinicao('planoCiclos', ciclos); })
+    .then(function () {
+      Estado.sessoes = Estado.sessoes.concat(r.sessoes);
+      Estado.series = Estado.series.concat(r.series);
+      reindexar();
+      fecharFolha();
+      avisar('Ciclo gravado: ' + r.sessoes.length + ' treinos, ' + r.series.length + ' séries' +
+        (r.choques.length ? ' (' + r.choques.length + ' dias já tinham treino)' : ''));
+      render();
+    })
+    .catch(function (e) { avisar('Não gravou: ' + e.message); });
+}
+
+/* ===========================================================================
    Arranque e navegacao
    ======================================================================== */
 
@@ -6033,8 +6323,9 @@ function trocarVista(nome) {
   if (nome !== Estado.vista) Estado.grupoAberto = null;
   Estado.vista = nome;
   if (nome !== 'treino') Estado.exercicioAtivo = null;
+  var separador = SEPARADOR_DA_VISTA[nome] || nome;
   Array.prototype.forEach.call(document.querySelectorAll('#separadores button'), function (b) {
-    b.classList.toggle('ativa', b.dataset.vista === nome);
+    b.classList.toggle('ativa', b.dataset.vista === separador);
   });
   Array.prototype.forEach.call(document.querySelectorAll('.vista'), function (v) {
     v.classList.toggle('ativa', v.id === 'v-' + nome);
@@ -6052,8 +6343,23 @@ function render() {
   else if (Estado.vista === 'analises') renderAnalises();
   else if (Estado.vista === 'peso') renderPeso();
   else if (Estado.vista === 'definicoes') renderDefinicoes();
+  else if (Estado.vista === 'plano') renderPlano();
+  else if (Estado.vista === 'comida') renderComida();
+  else if (Estado.vista === 'mais') renderMais();
   else renderExercicios();
+
+  // Os ecras que vivem dentro do Mais tem um Voltar para o Mais. Os Exercicios
+  // com um grupo aberto ja tem o seu (volta aos grupos), e esse ganha.
+  if (SEPARADOR_DA_VISTA[Estado.vista] === 'mais' &&
+      !(Estado.vista === 'exercicios' && Estado.grupoAberto)) {
+    $('#btVoltar').hidden = false;
+  }
 }
+
+/* A barra tem 5 separadores; os ecras que sairam dela vivem dentro de um. */
+var SEPARADOR_DA_VISTA = {
+  historico: 'mais', exercicios: 'mais', definicoes: 'mais', peso: 'comida'
+};
 
 function carregarTudo() {
   return Promise.all(LOJAS_BACKUP.map(function (l) { return BD.todos(l); })
@@ -6118,8 +6424,9 @@ function arrancar() {
   $('#btVoltar').onclick = function () {
     // O mesmo botao serve os dois sitios onde se entra um nivel: o registo de
     // um exercicio no treino, e um grupo muscular nos Exercicios.
-    if (Estado.vista === 'exercicios') Estado.grupoAberto = null;
-    else Estado.exercicioAtivo = null;
+    if (Estado.vista === 'exercicios' && Estado.grupoAberto) { Estado.grupoAberto = null; render(); return; }
+    if (SEPARADOR_DA_VISTA[Estado.vista] === 'mais') { trocarVista('mais'); return; }
+    Estado.exercicioAtivo = null;
     render();
   };
 

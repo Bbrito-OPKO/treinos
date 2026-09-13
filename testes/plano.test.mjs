@@ -157,6 +157,32 @@ test('arredondamento do Python nos pesos: 150 kg -> 140/160, 25 kg -> 25/27,5', 
   assert.deepEqual(p.acessorios['Barbell Curl'].series, [[25, 8], [27.5, 6]]);
 });
 
+test('ciclo seguinte: maximos sobem o incremento, series na mesma proporcao', () => {
+  const { progredirConfig } = nucleo;
+  const c1 = copia(PLANO_CONFIG_PADRAO);
+  const c2 = progredirConfig(c1, '2026-09-28', '2026-09-26');
+  assert.equal(c2.lift.MORTO.max, 187.5);
+  assert.equal(c2.lift.SUPINO.max, 122.5);
+  // o single dos maximos fica no maximo novo
+  assert.deepEqual(c2.lift.MORTO.maximos[2], [187.5, 1]);
+  assert.deepEqual(c2.lift.SUPINO.maximos[2], [122.5, 1]);
+  // 130 x 187,5/180 = 135,4 -> 135 ; 90 x 122,5/120 = 91,875 -> 92,5
+  assert.deepEqual(c2.lift.MORTO.maximos[0], [135, 3]);
+  assert.deepEqual(c2.lift.SUPINO.maximos[3], [92.5, 10]);
+  for (const L of c2.lifts) for (const m of ['maximos', 'volume_5', 'volume_8', 'leve']) {
+    for (const [kg, reps] of c2.lift[L][m]) {
+      assert.equal(kg % 2.5, 0, `${L} ${m} ${kg}`);
+      assert.ok(kg >= 0);
+    }
+    assert.deepEqual(c2.lift[L].volume_5.map(s => s[1]), c1.lift[L].volume_5.map(s => s[1]));
+  }
+  assert.deepEqual(c2.ajustes, {});
+  assert.equal(c1.lift.MORTO.max, 180, 'a configuracao antiga nao pode mudar');
+  const p = gerarPlano(c2);
+  assert.equal(p.calendario[0].dias.segunda.data, '2026-09-28');
+  assert.deepEqual(validarPlano(p), []);
+});
+
 test('ciclo com outra data de arranque: datas deslocam, regras continuam a passar', () => {
   const cfg = copia(PLANO_CONFIG_PADRAO);
   cfg.dataInicio = '2026-09-28';

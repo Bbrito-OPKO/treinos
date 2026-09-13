@@ -84,13 +84,48 @@ cabeçalho, separador `;`, vírgula decimal e datas em vários formatos.
 Os dados vivem na IndexedDB do telemóvel. **Não há servidor e não há cópia
 nenhuma noutro sítio.**
 
-- **Exercícios → Dados → Guardar backup (JSON)** — leva tudo, e é o mesmo
-  ficheiro que a app sabe repor.
+- **Mais → Definições → Guardar backup (JSON)** — leva tudo menos as
+  definições (é lá que fica a chave da IA), e é o mesmo ficheiro que a app sabe
+  repor.
 - **Guardar em CSV** — para abrir no Excel ou levar para outra app.
+
+Ao importar um backup há duas opções:
+
+- **Juntar** (a de defeito) — não apaga nada. O que vem no backup escreve por
+  cima do mesmo registo (pelo id); o que só existe na app fica. Se um id do
+  backup aponta para outra coisa (outro dia, outro exercício), não junta nada e
+  diz porquê: é um backup de outra app. Atenção: não sabe o que apagaste depois
+  do backup — juntar um backup antigo traz de volta séries que tiraste.
+- **Repor** — apaga e escreve o backup. Pede dois toques.
 
 Enquanto a app estiver no ecrã principal, o iOS não lhe apaga os dados. Se for
 usada só pelo Safari, ao fim de sete dias sem a abrir o iOS pode limpá-los.
 **Adiciona-a ao ecrã principal e guarda um backup de vez em quando.**
+
+---
+
+## O plano de treino
+
+**Plano** (na barra) mostra o ciclo de 4 semanas, dia a dia, com o que já foi
+feito. **Ciclo seguinte** gera as 4 semanas a seguir:
+
+- cada lift sobe o seu incremento (morto 7,5 · agachamento 5 · supino e ombro
+  2,5) e as séries dele sobem na mesma proporção, arredondadas a 2,5 kg;
+- tocar num exercício tira-o desse dia e o plano refaz-se;
+- o plano passa pelas **17 regras** antes de se poder gravar — se uma falha, o
+  botão fica desligado e diz qual;
+- grava no Treino como séries por fazer; dias que já têm treino ficam como estão.
+
+O gerador é a tradução do `gerar.py` (`OneDrive\Claude\Treino`) e o validador a
+do `validar.py`. A prova de que a tradução está certa: com a configuração de
+partida, a app gera **exatamente** o `plano-treino.json` que o Python gerou.
+A prova 16 do Python nunca olhava (comparava uma lista com o número 1); na app
+está corrigida.
+
+Os ciclos ficam na base, em `definicoes.planoCiclos`.
+
+A barra: **Treino · Plano · Comida · Análises · Mais**. O Peso está dentro da
+Comida; Histórico, Exercícios e Definições dentro do Mais.
 
 ---
 
@@ -103,6 +138,7 @@ usada só pelo Safari, ao fim de sete dias sem a abrir o iOS pode limpá-los.
 | `manifest.json` | Diz ao iPhone como a instalar. |
 | `icon-*.png` | Ícones. Refazem-se com `ferramentas/gerar_icones.py`. |
 | `ferramentas/converter_fitnotes.py` | Converte a base do FitNotes para backup JSON. |
+| `ferramentas/provar_migracao.mjs` | Prova, num Chrome a sério e com o backup real, que mudar a versão da base não perde nada. Correr sempre que a versão da IndexedDB subir. |
 | `testes/` | Testes da lógica crítica. |
 
 ## Correr os testes
@@ -116,8 +152,10 @@ node --test testes/*.test.mjs
 Os testes lêem a lógica directamente do `index.html`, entre os marcadores
 `NÚCLEO:INÍCIO` e `NÚCLEO:FIM`. Mexer aí obriga a correr isto outra vez.
 
-Os testes que usam o histórico real procuram `dados-reais/fitnotes.csv` e
-`dados-reais/backup-fitnotes.json`. Essa pasta está no `.gitignore` de
+Os testes que usam o histórico real procuram em `dados-reais/`:
+`fitnotes.csv`, `backup-fitnotes.json`, `treinos-2026-09-13.json` (backup da
+app), `backup-com-plano.json`, `plano-treino.json` e `para_app_esperado.json`
+(os dois últimos são a referência do gerador em Python). Essa pasta está no `.gitignore` de
 propósito — são seis anos de treinos e o repositório é público. Sem ela, esses
 testes dizem que foram saltados em vez de passarem a testar nada.
 

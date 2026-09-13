@@ -30,7 +30,7 @@ const NOMES = [
   'progressoDeObjetivo', 'estimarPesoParaReps', 'estimativasPorReps',
   'LOJAS_BACKUP', 'juntarBackup',
   'PLANO_CONFIG_PADRAO', 'arredondarPy', 'escolherMax', 'escolherMin',
-  'gerarPlano', 'validarPlano', 'planoParaSessoes'
+  'gerarPlano', 'validarPlano', 'planoParaSessoes', 'progredirConfig'
 ];
 
 function extrair() {
