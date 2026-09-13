@@ -5128,8 +5128,9 @@ function mostrarNavDia(data) {
     ? esc(longa)
     : esc(relativa) + '<small>' + esc(longa) + '</small>';
 
-  // Nao se anda para depois de hoje: nao ha treinos no futuro para ver.
-  $('#diaDepois').disabled = data >= hojeIso();
+  // Para a frente vai-se ate ao ultimo treino marcado (o plano); depois disso
+  // nao ha nada para ver.
+  $('#diaDepois').disabled = data >= limiteFuturo();
 
   $('#diaAntes').onclick = function () { andarDia(-1); };
   $('#diaDepois').onclick = function () { andarDia(1); };
@@ -5141,9 +5142,16 @@ function esconderNavDia() {
   $('#titulo').hidden = false;
 }
 
+/* O dia mais a frente onde ha treino marcado, ou hoje se nao houver nenhum. */
+function limiteFuturo() {
+  var hoje = hojeIso(), max = hoje;
+  Estado.sessoes.forEach(function (s) { if (s.data > max) max = s.data; });
+  return max;
+}
+
 function andarDia(passo) {
   var nova = recuarDias(Estado.dataAtual, -passo);
-  if (nova > hojeIso()) return;
+  if (nova > limiteFuturo()) return;
   Estado.dataAtual = nova;
   Estado.exercicioAtivo = null;
   vibrar(8);
@@ -5173,7 +5181,7 @@ function escolherDia() {
             '<h3 style="margin:0;text-transform:none;font-size:17px;color:var(--texto)">' +
               esc(MESES[m - 1] + ' ' + ano) + '</h3>' +
             '<button class="btn fina" id="edDepois"' +
-              (mes >= hojeIso().slice(0, 7) ? ' disabled' : '') + '>&#8250;</button>' +
+              (mes >= limiteFuturo().slice(0, 7) ? ' disabled' : '') + '>&#8250;</button>' +
           '</div><div class="calendario">' +
           ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'].map(function (x) {
             return '<div class="dn">' + x + '</div>';
@@ -5187,7 +5195,7 @@ function escolherDia() {
           if (iso === hojeIso()) classes.push('hoje');
           if (iso === Estado.dataAtual) classes.push('sel');
           html += '<button class="' + classes.join(' ') + '" data-ir="' + iso + '"' +
-            (iso > hojeIso() ? ' disabled' : '') + '>' + dia + '</button>';
+            (iso > limiteFuturo() ? ' disabled' : '') + '>' + dia + '</button>';
         }
         html += '</div><p class="mini fraco centro" style="margin:12px 0 0">' +
           'Os dias a azul têm treino.</p></div>';
