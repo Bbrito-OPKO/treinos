@@ -1507,6 +1507,871 @@ function progressoDeObjetivo(valorAtual, objetivo, hoje) {
   };
 }
 
+/* ===========================================================================
+   Gerador do plano de treino
+
+   Traducao do gerar.py (OneDrive\Claude\Treino) para a app poder fazer o
+   plano sozinha, sem PC. As regras sao as mesmas, linha a linha — e o teste
+   plano.test.mjs prova-o: com a configuracao de partida, sai exatamente o
+   plano-treino.json que o Python gerou.
+
+   Duas armadilhas da traducao, as duas com teste:
+   - o round() do Python arredonda o ,5 para o PAR (round(2.5) = 2), o
+     Math.round sobe sempre. Sem arredondarPy os pesos saiam 2,5 kg ao lado.
+   - max()/min() do Python devolvem o PRIMEIRO empatado. escolherMax e
+     escolherMin fazem o mesmo; um reduce ingenuo devolvia o ultimo.
+
+   Tudo o que era constante no Python e aqui a configuracao do plano
+   (PLANO_CONFIG_PADRAO), e e ela que se guarda e edita na app.
+   ======================================================================== */
+
+var PLANO_DIAS = ['segunda', 'terca', 'quinta', 'sexta'];
+var PLANO_OFFSET_DIA = { segunda: 0, terca: 1, quinta: 3, sexta: 4 };
+
+var PLANO_CONFIG_PADRAO = {
+  dataInicio: '2026-08-31',
+  criado: '2026-08-25',
+  lifts: ['MORTO', 'SUPINO', 'AGACHAMENTO', 'OMBRO'],
+  nomeLift: {
+    MORTO: 'Peso morto convencional',
+    SUPINO: 'Supino plano com barra',
+    AGACHAMENTO: 'Agachamento com barra livre',
+    OMBRO: 'Press de ombro com barra'
+  },
+  // o grupo a que pertencem os acessorios de cada lift
+  grupoAcc: { MORTO: 'costas', SUPINO: 'peito', AGACHAMENTO: 'perna', OMBRO: 'ombro' },
+  // categoria funcional: e o que garante corpo inteiro todos os dias. O morto
+  // cobre "puxar" mas nao "perna" — o dia do morto leva quadricipite a parte.
+  categoria: { perna: 'perna', peito: 'empurrar', ombro: 'empurrar', costas: 'puxar',
+    biceps: 'braco', triceps: 'braco', gemeos: 'gemeos', abs: 'abs', morto: 'puxar' },
+  obrigatorias: ['perna', 'empurrar', 'puxar', 'braco'],
+  // o lift abre; o fim e sempre braco -> gemeos -> abs
+  ordemSessao: { perna: 1, empurrar: 1, puxar: 1, braco: 2, gemeos: 3, abs: 4 },
+  isolamento: ['Leg Extension Machine', 'Seated Leg Curl Machine', 'Leg Curl Machine',
+    'Flat Machine Fly', 'Flat Dumbbell Fly', 'Lateral Dumbbell Raise', 'Lateral Machine Raise',
+    'Rear Delt Machine Fly', 'Rear Delt Dumbbell Raise'],
+  seriesAcessorio: 2,
+  alvo: { perna: 14, costas: 8, peito: 10, ombro: 10, biceps: 4, triceps: 4, gemeos: 4, abs: 4, morto: 4 },
+  gemeosDias: 2,
+  limSegunda: 16,
+  tetoDia: 18,
+  maxGrupoDia: 6,
+  // agachamento -> so o lift; morto -> 2 (so quadriceps); supino e ombro -> 4
+  pernaPorLift: { AGACHAMENTO: 0, MORTO: 2, SUPINO: 4, OMBRO: 4 },
+  minDia: 14,
+  absDias: ['segunda', 'quinta'],
+  bracoDoLift: { SUPINO: 'triceps', OMBRO: 'triceps', MORTO: 'biceps', AGACHAMENTO: 'biceps' },
+  // mesmo movimento: nunca dois no mesmo dia (o lift conta)
+  familia: {
+    'Peso morto convencional': 'hinge', 'Romanian Deadlift': 'hinge',
+    'Agachamento com barra livre': 'agachamento',
+    'Barbell Front Squat': 'agachamento', 'Smith Squat': 'agachamento',
+    'Goblet Squat': 'agachamento',
+    'Bulgarian': 'unilateral', 'Lungees': 'unilateral',
+    'Seated Leg Curl Machine': 'leg curl', 'Leg Curl Machine': 'leg curl',
+    'Supino plano com barra': 'supino', 'Flat Dumbbell Bench Press': 'supino',
+    'Flat Machine Fly': 'fly', 'Flat Dumbbell Fly': 'fly',
+    'Barbell Row': 'remada barra', 'Pendlay Row': 'remada barra',
+    'Chin Up': 'chin up', 'Chin Up Machine': 'chin up',
+    'Lat Pulldown': 'puxada',
+    'Press de ombro com barra': 'press ombro',
+    'Lateral Dumbbell Raise': 'lateral', 'Lateral Machine Raise': 'lateral',
+    'Rear Delt Machine Fly': 'rear delt', 'Rear Delt Dumbbell Raise': 'rear delt'
+  },
+  // carga axial a serio: nunca em dias seguidos
+  familiaDura: {
+    'Peso morto convencional': 'hinge', 'Romanian Deadlift': 'hinge',
+    'Agachamento com barra livre': 'agachamento pesado',
+    'Barbell Front Squat': 'agachamento pesado',
+    'Bulgarian': 'unilateral', 'Lungees': 'unilateral'
+  },
+  subgrupo: {
+    'Agachamento com barra livre': 'quadriceps', 'Leg Press': 'quadriceps',
+    'Leg Extension Machine': 'quadriceps', 'Goblet Squat': 'quadriceps',
+    'Smith Squat': 'quadriceps', 'Barbell Front Squat': 'quadriceps',
+    'Peso morto convencional': 'posterior', 'Romanian Deadlift': 'posterior',
+    'Seated Leg Curl Machine': 'posterior', 'Leg Curl Machine': 'posterior',
+    'Bulgarian': 'unilateral', 'Lungees': 'unilateral',
+    'Incline Barbell Bench Press': 'peito inclinado',
+    'Incline Dumbbell Bench Press': 'peito inclinado',
+    'Supino plano com barra': 'peito plano',
+    'Flat Dumbbell Bench Press': 'peito plano', 'Chest Dips': 'peito plano',
+    'Flat Machine Fly': 'peito isolamento', 'Flat Dumbbell Fly': 'peito isolamento',
+    'Lateral Dumbbell Raise': 'ombro acessorio', 'Lateral Machine Raise': 'ombro acessorio',
+    'Rear Delt Machine Fly': 'ombro acessorio', 'Rear Delt Dumbbell Raise': 'ombro acessorio'
+  },
+  // o que cada lift proibe no proprio dia e na vespera
+  interfere: {
+    MORTO: { dia: ['posterior', 'unilateral'], vespera: ['posterior', 'unilateral'] },
+    OMBRO: { dia: [], vespera: ['peito inclinado', 'ombro acessorio'] },
+    AGACHAMENTO: { dia: [], vespera: ['posterior', 'unilateral'] }
+  },
+  // isolamentos pequenos: 10 -> 8 reps; o resto 8 -> 6
+  repsAltas: ['Lateral Dumbbell Raise', 'Lateral Machine Raise', 'Rear Delt Machine Fly',
+    'Rear Delt Dumbbell Raise', 'Barbell Calf Raise', 'Seated Calf Raise Machine',
+    'Standing Calf Raise Machine'],
+  // pedidos a mao: 'semana|dia' -> { fora: [...], dentro: [...] }
+  ajustes: {
+    '1|quinta': { fora: ['Flat Dumbbell Bench Press'], dentro: ['Chest Dips'] },
+    '1|sexta': { fora: ['Lungees'] },
+    '2|sexta': { fora: ['Goblet Squat'] }
+  },
+  // segunda MAXIMOS -> sexta leve -> quinta PESADO -> terca medio -> MAXIMOS
+  modo: { segunda: 'maximos', terca: 'volume_8', quinta: 'volume_5', sexta: 'leve' },
+  lift: {
+    MORTO: { max: 180, inc: 7.5,
+      maximos: [[130, 3], [155, 2], [180, 1], [140, 8]],
+      volume_5: [[125, 5], [135, 5], [145, 5], [152.5, 5]],
+      volume_8: [[115, 8], [125, 8], [135, 7], [145, 6]],
+      leve: [[110, 8], [120, 8], [127.5, 8], [135, 8]] },
+    SUPINO: { max: 120, inc: 2.5,
+      maximos: [[85, 3], [102.5, 2], [120, 1], [90, 10]],
+      volume_5: [[82.5, 5], [90, 5], [97.5, 5], [102.5, 5]],
+      volume_8: [[77.5, 8], [85, 8], [90, 7], [97.5, 6]],
+      leve: [[70, 8], [77.5, 8], [82.5, 8], [87.5, 8]] },
+    AGACHAMENTO: { max: 145, inc: 5,
+      maximos: [[105, 3], [125, 2], [145, 1], [110, 8]],
+      volume_5: [[100, 5], [107.5, 5], [115, 5], [122.5, 5]],
+      volume_8: [[92.5, 8], [100, 8], [107.5, 7], [115, 6]],
+      leve: [[87.5, 8], [95, 8], [102.5, 8], [110, 8]] },
+    OMBRO: { max: 65, inc: 2.5,
+      maximos: [[47.5, 3], [55, 2], [65, 1], [45, 10]],
+      volume_5: [[45, 5], [47.5, 5], [52.5, 5], [55, 5]],
+      volume_8: [[42.5, 8], [45, 8], [47.5, 7], [52.5, 6]],
+      leve: [[35, 8], [40, 8], [42.5, 8], [47.5, 8]] }
+  },
+  // catalogo: nome -> [grupo, kg, reps min, reps max, 'pesado'|'leve']
+  // A ORDEM conta: e a preferencia dentro do grupo, como no Python.
+  acc: [
+    ['Romanian Deadlift', 'perna', 132.5, 6, 8, 'pesado'],
+    ['Bulgarian', 'perna', 65, 6, 8, 'pesado'],
+    ['Lungees', 'perna', 27.5, 6, 8, 'pesado'],
+    ['Leg Press', 'perna', 110, 6, 8, 'leve'],
+    ['Leg Extension Machine', 'perna', 125, 6, 8, 'leve'],
+    ['Seated Leg Curl Machine', 'perna', 22.5, 6, 8, 'leve'],
+    ['Leg Curl Machine', 'perna', 27.5, 6, 8, 'leve'],
+    ['Goblet Squat', 'perna', 32.5, 6, 8, 'leve'],
+    ['Smith Squat', 'perna', 62.5, 6, 8, 'leve'],
+    ['Barbell Front Squat', 'perna', 42.5, 6, 8, 'pesado'],
+    ['Incline Barbell Bench Press', 'peito', 72.5, 6, 8, 'pesado'],
+    ['Chest Dips', 'peito', 0, 6, 8, 'leve'],
+    ['Incline Dumbbell Bench Press', 'peito', 65, 6, 8, 'leve'],
+    ['Flat Dumbbell Bench Press', 'peito', 90, 6, 8, 'leve'],
+    ['Flat Machine Fly', 'peito', 125, 6, 8, 'leve'],
+    ['Flat Dumbbell Fly', 'peito', 47.5, 6, 8, 'leve'],
+    ['Barbell Row', 'costas', 100, 6, 8, 'pesado'],
+    ['Pendlay Row', 'costas', 55, 6, 8, 'pesado'],
+    ['Chin Up', 'costas', 20, 6, 8, 'pesado'],
+    ['Lat Pulldown', 'costas', 115, 6, 8, 'leve'],
+    ['Chin Up Machine', 'costas', 127.5, 6, 8, 'leve'],
+    ['Seated Cable Row', 'costas', 110, 6, 8, 'leve'],
+    ['Dumbbell Row', 'costas', 35, 6, 8, 'leve'],
+    ['Lateral Dumbbell Raise', 'ombro', 37.5, 10, 8, 'leve'],
+    ['Lateral Machine Raise', 'ombro', 22.5, 10, 8, 'leve'],
+    ['Rear Delt Machine Fly', 'ombro', 90, 10, 8, 'leve'],
+    ['Rear Delt Dumbbell Raise', 'ombro', 27.5, 10, 8, 'leve'],
+    ['Barbell Curl', 'biceps', 40, 6, 8, 'leve'],
+    ['Dumbbell Hammer Curl', 'biceps', 42.5, 6, 8, 'leve'],
+    ['Cable Curl', 'biceps', 77.5, 6, 8, 'leve'],
+    ['Dumbell Skullcrusher', 'triceps', 47.5, 6, 8, 'leve'],
+    ['Cable Overhead Triceps Extension', 'triceps', 67.5, 6, 8, 'leve'],
+    ['Bar Push Down', 'triceps', 50, 6, 8, 'leve'],
+    ['Barbell Calf Raise', 'gemeos', 90, 10, 8, 'leve'],
+    ['Seated Calf Raise Machine', 'gemeos', 80, 10, 8, 'leve'],
+    ['Standing Calf Raise Machine', 'gemeos', 45, 10, 8, 'leve'],
+    ['Crunch', 'abs', 0, 30, 40, 'leve'],
+    ['Hanging Leg Raise', 'abs', 0, 20, 30, 'leve'],
+    ['Ab-Wheel Rollout', 'abs', 0, 15, 20, 'leve'],
+    ['Plank', 'abs', 0, 60, 90, 'leve']
+  ],
+  descansosSeg: { top_maximos: 300, lift_foco: 180, composto: 90, isolamento: 60 }
+};
+
+/* round() do Python: o ,5 exato vai para o par. */
+function arredondarPy(x) {
+  var f = Math.floor(x), d = x - f;
+  if (d > 0.5) return f + 1;
+  if (d < 0.5) return f;
+  return f % 2 === 0 ? f : f + 1;
+}
+
+/* max()/min() do Python com key: o primeiro empatado ganha. */
+function escolherMax(lista, chave) {
+  var melhor, vm;
+  for (var i = 0; i < lista.length; i++) {
+    var v = chave(lista[i]);
+    if (i === 0 || compararChaves(v, vm) > 0) { melhor = lista[i]; vm = v; }
+  }
+  return melhor;
+}
+function escolherMin(lista, chave) {
+  var melhor, vm;
+  for (var i = 0; i < lista.length; i++) {
+    var v = chave(lista[i]);
+    if (i === 0 || compararChaves(v, vm) < 0) { melhor = lista[i]; vm = v; }
+  }
+  return melhor;
+}
+/* Compara numeros ou tuplos (arrays) como o Python. */
+function compararChaves(a, b) {
+  if (Array.isArray(a)) {
+    for (var i = 0; i < a.length; i++) {
+      var c = compararChaves(a[i], b[i]);
+      if (c) return c;
+    }
+    return 0;
+  }
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function _somarDias(iso, n) {
+  var d = _dataUtc(iso);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function _copia(x) { return JSON.parse(JSON.stringify(x)); }
+
+/* Prepara as tabelas derivadas uma vez (ACC por nome, PREF por grupo). */
+function _prepararConfig(cfg) {
+  var c = { cfg: cfg, ACC: {}, PREF: {} };
+  cfg.acc.forEach(function (a) {
+    c.ACC[a[0]] = [a[1], a[2], a[3], a[4], a[5]];
+    (c.PREF[a[1]] = c.PREF[a[1]] || []).push(a[0]);
+  });
+  return c;
+}
+
+function _seguidos(d1, d2) { return PLANO_OFFSET_DIA[d2] - PLANO_OFFSET_DIA[d1] === 1; }
+function _diaSeguinte(d) {
+  var i = PLANO_DIAS.indexOf(d);
+  return i + 1 < PLANO_DIAS.length && _seguidos(d, PLANO_DIAS[i + 1]) ? PLANO_DIAS[i + 1] : null;
+}
+function _diaAnterior(d) {
+  var i = PLANO_DIAS.indexOf(d);
+  return i > 0 && _seguidos(PLANO_DIAS[i - 1], d) ? PLANO_DIAS[i - 1] : null;
+}
+
+function seriesAcessorio(c, nome, dia) {
+  var a = c.ACC[nome], g = a[0], peso = a[1], rmin = a[2], rmax = a[3];
+  if (g === 'abs') return [[peso, rmin], [peso, rmax]];
+  var altas = 8, baixas = 6;
+  if (c.cfg.repsAltas.indexOf(nome) !== -1) { altas = 10; baixas = 8; }
+  var fator = 1.0;
+  if (dia === 'sexta') { altas = 12; baixas = 10; fator = 0.88; }
+  if (!peso) return [[0, altas], [0, baixas]];
+  peso = peso * fator;
+  var passo = peso < 60 ? 2.5 : 5;
+  var s1 = arredondarPy(peso * 0.95 / passo) * passo;
+  var s2 = arredondarPy(peso * 1.05 / passo) * passo;
+  if (s2 <= s1) s2 = s1 + passo;
+  return [[s1, altas], [s2, baixas]];
+}
+
+function calendarioSemana(c, w) {
+  var L = c.cfg.lifts, out = {};
+  PLANO_DIAS.forEach(function (d, i) { out[d] = L[(w + i) % 4]; });
+  return out;
+}
+
+function _bloqueados(c, d, diasLift) {
+  var fora = {}, reg = c.cfg.interfere[diasLift[d]];
+  if (reg) reg.dia.forEach(function (s) { fora[s] = 1; });
+  var seg = _diaSeguinte(d);
+  if (seg) {
+    reg = c.cfg.interfere[diasLift[seg]];
+    if (reg) reg.vespera.forEach(function (s) { fora[s] = 1; });
+  }
+  return fora;
+}
+
+function _grupoCabeNoDia(c, g, d, diasLift) {
+  var fora = _bloqueados(c, d, diasLift);
+  return c.PREF[g].some(function (x) {
+    var s = c.cfg.subgrupo[x];
+    return !(s !== undefined && fora[s]);
+  });
+}
+
+function _nSeriesLift(c, lift, dia) { return c.cfg.lift[lift][c.cfg.modo[dia]].length; }
+
+function _grupoDoLift(c, L) { return L === 'MORTO' ? 'morto' : c.cfg.grupoAcc[L]; }
+
+function alocarSemana(c, diasLift) {
+  var cfg = c.cfg, SA = cfg.seriesAcessorio;
+  var need = {};
+  Object.keys(cfg.alvo).forEach(function (g) {
+    if (g === 'morto') return;
+    if (g === 'perna') {
+      need[g] = Object.keys(cfg.pernaPorLift).reduce(function (s, k) { return s + cfg.pernaPorLift[k]; }, 0);
+      return;
+    }
+    var feitas = 0;
+    PLANO_DIAS.forEach(function (d) {
+      var L = diasLift[d];
+      if (cfg.grupoAcc[L] === g && L !== 'MORTO') feitas = _nSeriesLift(c, L, d);
+    });
+    need[g] = Math.max(0, cfg.alvo[g] - feitas);
+  });
+
+  var carga = {}, noDia = {}, plano = {};
+  PLANO_DIAS.forEach(function (d) {
+    var n = _nSeriesLift(c, diasLift[d], d);
+    carga[d] = n;
+    noDia[d] = {};
+    noDia[d][_grupoDoLift(c, diasLift[d])] = n;
+    plano[d] = {};
+  });
+
+  function por(d, g, n) {
+    plano[d][g] = (plano[d][g] || 0) + n;
+    noDia[d][g] = (noDia[d][g] || 0) + n;
+    carga[d] += n;
+  }
+  function teto(d) { return d === 'segunda' ? cfg.limSegunda : cfg.tetoDia; }
+  function cabe(d, g, n) {
+    return carga[d] + n <= teto(d) &&
+      (noDia[d][g] || 0) + n <= cfg.maxGrupoDia &&
+      (need[g] || 0) >= n &&
+      _grupoCabeNoDia(c, g, d, diasLift);
+  }
+  function cobertas(d) {
+    var s = {};
+    s[cfg.categoria[_grupoDoLift(c, diasLift[d])]] = 1;
+    Object.keys(plano[d]).forEach(function (g) { s[cfg.categoria[g]] = 1; });
+    return s;
+  }
+
+  // 0. perna conforme o lift
+  PLANO_DIAS.forEach(function (d) {
+    var n = cfg.pernaPorLift[diasLift[d]];
+    if (n) por(d, 'perna', n);
+  });
+  need.perna = 0;
+  // 1. abs
+  cfg.absDias.forEach(function (d) { por(d, 'abs', SA); });
+  need.abs = 0;
+  // 2. braco segue o lift
+  PLANO_DIAS.forEach(function (d) {
+    var g = cfg.bracoDoLift[diasLift[d]];
+    por(d, g, SA);
+    need[g] -= SA;
+  });
+  // 3. gemeos nos dias mais leves
+  var perm = PLANO_DIAS.filter(function (d) { return cabe(d, 'gemeos', SA); })
+    .sort(function (a, b) { return carga[a] - carga[b]; });
+  perm.slice(0, cfg.gemeosDias).forEach(function (d) {
+    por(d, 'gemeos', SA);
+    need.gemeos -= SA;
+  });
+  // 4. cobertura: perna, empurrar, puxar, braco
+  PLANO_DIAS.forEach(function (d) {
+    cfg.obrigatorias.forEach(function (cat) {
+      if (cobertas(d)[cat]) return;
+      var cands = Object.keys(need).filter(function (g) {
+        return cfg.categoria[g] === cat && need[g] >= SA && cabe(d, g, SA);
+      });
+      if (!cands.length) throw new Error('sem forma de cobrir ' + cat + ' na ' + d);
+      var g = escolherMax(cands, function (x) { return need[x]; });
+      por(d, g, SA);
+      need[g] -= SA;
+    });
+  });
+  // 5. o resto, pelos dias mais leves
+  for (;;) {
+    var ks = Object.keys(need);
+    if (!ks.some(function (g) { return need[g] > 0; })) break;
+    var g5 = escolherMax(ks, function (x) { return need[x]; });
+    if (need[g5] <= 0) break;
+    var cands5 = PLANO_DIAS.filter(function (d) { return cabe(d, g5, SA); });
+    if (!cands5.length) throw new Error('sem espaco para ' + g5 + ' (faltam ' + need[g5] + ')');
+    var d5 = escolherMin(cands5, function (x) { return [noDia[x][g5] || 0, carga[x]]; });
+    por(d5, g5, SA);
+    need[g5] -= SA;
+  }
+  // 6. equilibrio: puxa dos dias cheios para os curtos (perna e abs de fora)
+  for (var it = 0; it < 12; it++) {
+    var dMin = escolherMin(PLANO_DIAS, function (x) { return carga[x]; });
+    var dMax = escolherMax(PLANO_DIAS, function (x) { return carga[x]; });
+    if (carga[dMin] >= cfg.minDia || carga[dMax] - carga[dMin] < 2 * SA) break;
+    var cands6 = Object.keys(plano[dMax]).filter(function (g) {
+      return g !== 'perna' && g !== 'abs' &&
+        plano[dMax][g] >= SA &&
+        _grupoCabeNoDia(c, g, dMin, diasLift) &&
+        (noDia[dMin][g] || 0) + SA <= cfg.maxGrupoDia &&
+        carga[dMin] + SA <= teto(dMin);
+    });
+    if (!cands6.length) break;
+    var g6 = escolherMax(cands6, function (x) { return plano[dMax][x]; });
+    plano[dMax][g6] -= SA;
+    if (plano[dMax][g6] === 0) delete plano[dMax][g6];
+    noDia[dMax][g6] -= SA;
+    carga[dMax] -= SA;
+    por(dMin, g6, SA);
+  }
+  return plano;
+}
+
+function _pesadosOk(c, g, dia, diasLift) {
+  return !(c.cfg.grupoAcc[diasLift.terca] === g && (dia === 'quinta' || dia === 'sexta'));
+}
+
+function escolherExercicios(c, planoSemana, diasLift, usos, semana) {
+  var cfg = c.cfg, ACC = c.ACC, PREF = c.PREF, SA = cfg.seriesAcessorio;
+  function familia(n) { return cfg.familia[n] !== undefined ? cfg.familia[n] : n; }
+  function familiaDura(n) { return cfg.familiaDura[n]; }
+  var out = {}, anterior = {};
+  var diaAgach = PLANO_DIAS.filter(function (d) { return diasLift[d] === 'AGACHAMENTO'; })[0];
+
+  PLANO_DIAS.forEach(function (d) {
+    var usados = {}, linhas = [];
+    var fams = {};
+    fams[familia(cfg.nomeLift[diasLift[d]])] = 1;
+    var duras = {};
+    [_diaAnterior(d), _diaSeguinte(d)].forEach(function (viz) {
+      if (!viz) return;
+      var f = familiaDura(cfg.nomeLift[diasLift[viz]]);
+      if (f) duras[f] = 1;
+    });
+    if (_diaAnterior(d)) {
+      Object.keys(anterior).forEach(function (x) {
+        var f = familiaDura(x);
+        if (f) duras[f] = 1;
+      });
+    }
+    var pares = Object.keys(planoSemana[d]).map(function (g) { return [g, planoSemana[d][g]]; })
+      .sort(function (a, b) { return b[1] - a[1]; });
+
+    pares.forEach(function (par) {
+      var g = par[0], n = par[1];
+      var permPesado = _pesadosOk(c, g, d, diasLift);
+      var lista = PREF[g].filter(function (x) { return permPesado || ACC[x][4] === 'leve'; });
+      if (!lista.length) {
+        lista = PREF[g].filter(function (x) { return ACC[x][4] === 'leve'; });
+        if (!lista.length) lista = PREF[g].slice();
+      }
+      var fora = _bloqueados(c, d, diasLift);
+      var aj = cfg.ajustes[semana + '|' + d] || {};
+      var vetados = aj.fora || [];
+      var pedidos = (aj.dentro || []).filter(function (x) { return ACC[x] && ACC[x][0] === g; });
+      var permitidos = lista.filter(function (x) {
+        var s = cfg.subgrupo[x], fd = familiaDura(x);
+        return !(s !== undefined && fora[s]) &&
+          !(fd !== undefined && duras[fd]) &&
+          vetados.indexOf(x) === -1;
+      });
+      if (permitidos.length) lista = permitidos;
+      var livres = lista.filter(function (x) { return !fams[familia(x)]; });
+      if (livres.length) lista = livres;
+      var frescos = _diaAnterior(d)
+        ? lista.filter(function (x) { return !anterior[x]; })
+        : lista.slice();
+      var k = Math.max(1, Math.floor(n / SA));
+      for (var bloco = 0; bloco < k; bloco++) {
+        var nome = null;
+        var pools = [frescos, lista];
+        var pedidosLivres = pedidos.filter(function (x) { return !usados[x] && lista.indexOf(x) !== -1; });
+        if (pedidosLivres.length) pools = [pedidosLivres, frescos, lista];
+        var pernaAcessoria = g === 'perna' && d !== diaAgach;
+        if (bloco === 0 && permPesado && !pernaAcessoria && k > 1 && !pedidosLivres.length) {
+          var pes = frescos.filter(function (x) { return ACC[x][4] === 'pesado'; });
+          if (pes.length) pools = [pes, frescos, lista];
+        }
+        for (var p = 0; p < pools.length; p++) {
+          var disp = pools[p].filter(function (x) { return !usados[x]; });
+          if (disp.length) {
+            nome = escolherMin(disp, function (x) { return [usos[x] || 0, PREF[g].indexOf(x)]; });
+            break;
+          }
+        }
+        if (nome === null) nome = escolherMin(lista, function (x) { return usos[x] || 0; });
+        usos[nome] = (usos[nome] || 0) + 1;
+        usados[nome] = 1;
+        fams[familia(nome)] = 1;
+        var semFam = lista.filter(function (x) { return !fams[familia(x)]; });
+        lista = semFam.length ? semFam : lista;
+        frescos = frescos.filter(function (x) { return !fams[familia(x)]; });
+        linhas.push([nome, SA]);
+      }
+    });
+    out[d] = linhas;
+    anterior = usados;
+  });
+  return out;
+}
+
+function construirSemana(c, w, usos) {
+  var cfg = c.cfg;
+  var diasLift = calendarioSemana(c, w);
+  var grupos = alocarSemana(c, diasLift);
+  var exs = escolherExercicios(c, grupos, diasLift, usos, w + 1);
+  var aprox = diasLift.terca;
+  var sem = { semana: w + 1, tipo: 'progressao', ciclo: 1,
+    maximos: diasLift.segunda, lift_em_aproximacao: aprox,
+    grupo_em_aproximacao: cfg.grupoAcc[aprox], dias: {} };
+  PLANO_DIAS.forEach(function (d) {
+    var L = diasLift[d], gL = _grupoDoLift(c, L);
+    var ex = [{ nome: cfg.nomeLift[L], grupo: gL, categoria: cfg.categoria[gL],
+      foco: true, modo: cfg.modo[d], intensidade: 'pesado',
+      series: _copia(cfg.lift[L][cfg.modo[d]]) }];
+    exs[d].forEach(function (linha) {
+      var a = c.ACC[linha[0]];
+      ex.push({ nome: linha[0], grupo: a[0], categoria: cfg.categoria[a[0]],
+        foco: false, intensidade: a[4], series: seriesAcessorio(c, linha[0], d) });
+    });
+    var ordemG = {}, nG = 0;
+    ex.forEach(function (e) {
+      if (!e.foco && ordemG[e.grupo] === undefined) ordemG[e.grupo] = nG++;
+    });
+    function chave(e) {
+      return e.foco ? [0, 0, 0] : [cfg.ordemSessao[e.categoria], ordemG[e.grupo],
+        cfg.isolamento.indexOf(e.nome) !== -1 ? 1 : 0];
+    }
+    ex.sort(function (a, b) { return compararChaves(chave(a), chave(b)); });
+    sem.dias[d] = { lift: L, modo: cfg.modo[d], exercicios: ex };
+  });
+  return sem;
+}
+
+/* O plano completo de um ciclo (4 semanas), com datas. Mesmo formato do
+   plano-treino.json, para o validador e o teste golden lerem os dois. */
+function gerarPlano(cfg) {
+  var c = _prepararConfig(cfg);
+  var usos = {};
+  var calendario = [0, 1, 2, 3].map(function (w) { return construirSemana(c, w, usos); });
+  calendario.forEach(function (sem, i) {
+    var base = _somarDias(cfg.dataInicio, 7 * i);
+    sem.inicio = base;
+    PLANO_DIAS.forEach(function (d) { sem.dias[d].data = _somarDias(base, PLANO_OFFSET_DIA[d]); });
+  });
+  var lifts = {};
+  cfg.lifts.forEach(function (L) {
+    lifts[L] = { nome: cfg.nomeLift[L], grupo: _grupoDoLift(c, L),
+      maximo_ciclo1: cfg.lift[L].max, incremento_por_ciclo: cfg.lift[L].inc,
+      maximos: _copia(cfg.lift[L].maximos), volume_5: _copia(cfg.lift[L].volume_5),
+      volume_8: _copia(cfg.lift[L].volume_8), leve: _copia(cfg.lift[L].leve) };
+  });
+  var acessorios = {};
+  cfg.acc.forEach(function (a) {
+    acessorios[a[0]] = { grupo: a[1], categoria: cfg.categoria[a[1]],
+      series: seriesAcessorio(c, a[0]), intensidade: a[5] };
+  });
+  var interferencia = {};
+  Object.keys(cfg.interfere).forEach(function (L) {
+    interferencia[L] = { dia: cfg.interfere[L].dia.slice().sort(),
+      vespera: cfg.interfere[L].vespera.slice().sort() };
+  });
+  return {
+    versao: 2,
+    criado: cfg.criado,
+    config: {
+      dias: PLANO_DIAS.slice(), rotacao: 'frente', ciclo_semanas: 4,
+      ordem_circular: cfg.lifts.slice(), modos: _copia(cfg.modo),
+      descansos_seg: _copia(cfg.descansosSeg),
+      categorias_obrigatorias_por_dia: cfg.obrigatorias.slice(),
+      data_inicio: cfg.dataInicio
+    },
+    lifts_foco: lifts,
+    acessorios: acessorios,
+    regras: {
+      corpo_inteiro_todos_os_dias: cfg.obrigatorias.slice(),
+      aproximacao_bloqueia_pesados_em: ['quinta', 'sexta'],
+      teto_series_dia_maximos: cfg.limSegunda,
+      teto_series_outros_dias: cfg.tetoDia,
+      max_series_por_grupo_por_dia: cfg.maxGrupoDia,
+      bracos: 'biceps em 2 dias, triceps nos outros 2 -- braco todos os dias',
+      perna_por_lift: _copia(cfg.pernaPorLift),
+      interferencia: interferencia,
+      subgrupos: _copia(cfg.subgrupo),
+      perna_dia_do_agachamento: 'so o agachamento, mais nada',
+      abs_dias: cfg.absDias.slice(),
+      min_series_por_dia: cfg.minDia,
+      familias: 'dois exercicios da mesma familia nunca no mesmo dia',
+      familia_por_exercicio: _copia(cfg.familia),
+      familia_dura: _copia(cfg.familiaDura),
+      progressao_acessorios: 'dupla progressao: acerta o topo da faixa em todas ' +
+        'as series -> +2,5 kg barra/halteres, +5 kg maquina/cabo',
+      maximos_falhado: 'se o top sair facil sobe 5 kg e repete; se falhar, fica ' +
+        'no peso anterior e o ciclo seguinte nao sobe'
+    },
+    volume_alvo_semanal: _copia(cfg.alvo),
+    calendario: calendario
+  };
+}
+
+/* ---------------------------------------------------------------------------
+   Validador do plano: as 17 provas do validar.py
+
+   Le so o plano final, nunca o gerador — para apanhar erros de traducao.
+   Devolve a lista de falhas; vazia quer dizer que as 17 passam.
+
+   Uma diferenca de proposito: a prova 16 do Python comparava a lista de
+   series com o numero 1 (e['series'] == 1), o que nunca e verdade — a prova
+   passava sempre sem olhar. Aqui compara-se o comprimento.
+   ------------------------------------------------------------------------- */
+
+function validarPlano(P) {
+  var DIAS = P.config.dias, ALVO = P.volume_alvo_semanal, OBRIG = P.config.categorias_obrigatorias_por_dia;
+  var GRUPO_ACC = { MORTO: 'costas', SUPINO: 'peito', AGACHAMENTO: 'perna', OMBRO: 'ombro' };
+  var CICLO = P.calendario.filter(function (s) { return s.tipo === 'progressao'; });
+  var TODAS = P.calendario;
+  var OFF = PLANO_OFFSET_DIA;
+  var falhas = [];
+  function seguidos(a, b) { return OFF[b] - OFF[a] === 1; }
+  function exs(sem, d) { return sem.dias[d].exercicios; }
+  function S(sem) { return 'S' + sem.semana + ' '; }
+
+  // 1. volume por grupo
+  CICLO.forEach(function (sem) {
+    var v = {};
+    DIAS.forEach(function (d) { exs(sem, d).forEach(function (e) { v[e.grupo] = (v[e.grupo] || 0) + e.series.length; }); });
+    Object.keys(ALVO).sort().forEach(function (g) {
+      if ((v[g] || 0) !== ALVO[g]) falhas.push('P1 ' + S(sem) + g + ': ' + (v[g] || 0) + ' (alvo ' + ALVO[g] + ')');
+    });
+  });
+  // 2. corpo inteiro
+  TODAS.forEach(function (sem) {
+    DIAS.forEach(function (d) {
+      var cats = {};
+      exs(sem, d).forEach(function (e) { cats[e.categoria] = 1; });
+      var falta = OBRIG.filter(function (c) { return !cats[c]; });
+      if (falta.length) falhas.push('P2 ' + S(sem) + d + ' sem ' + falta.join('+'));
+    });
+  });
+  // aparicoes de cada lift no ciclo: [dia absoluto, dia, modo, semana]
+  function aparicoes(L) {
+    var ap = [];
+    CICLO.forEach(function (sem) {
+      DIAS.forEach(function (d) {
+        if (sem.dias[d].lift === L) ap.push([(sem.semana - 1) * 7 + OFF[d] + 1, d, sem.dias[d].modo, sem.semana]);
+      });
+    });
+    return ap.sort(function (a, b) { return a[0] - b[0]; });
+  }
+  var ESPERADO = ['segunda', 'sexta', 'quinta', 'terca'];
+  // 3. rotacao
+  P.config.ordem_circular.forEach(function (L) {
+    var ap = aparicoes(L);
+    var seq = ap.map(function (x) { return x[1]; });
+    var i0 = ESPERADO.indexOf(seq[0]);
+    var esp = [0, 1, 2, 3].map(function (k) { return ESPERADO[(i0 + k) % 4]; });
+    var modos = ap.map(function (x) { return x[2]; }).sort();
+    var ok = ap.length === 4 && modos.join() === 'leve,maximos,volume_5,volume_8' && seq.join() === esp.join();
+    if (!ok) falhas.push('P3 ' + L + ' rotacao: ' + ap.length + 'x, dias ' + seq.join('>') + ' (esperado ' + esp.join('>') + ')');
+  });
+  // 4. 11 dias depois dos maximos
+  P.config.ordem_circular.forEach(function (L) {
+    var ap = aparicoes(L);
+    var dias = ap.map(function (x) { return x[0]; });
+    var gaps = [];
+    for (var i = 0; i < dias.length - 1; i++) gaps.push(dias[i + 1] - dias[i]);
+    gaps.push(dias[0] + 28 - dias[dias.length - 1]);
+    var im = ap.map(function (x) { return x[2]; }).indexOf('maximos');
+    if (gaps[im] !== 11) falhas.push('P4 ' + L + ': ' + gaps[im] + ' dias depois dos maximos, esperado 11');
+  });
+  // 5. sexta nunca e o dos maximos seguintes
+  CICLO.forEach(function (sem, i) {
+    var prox = CICLO[(i + 1) % CICLO.length];
+    if (sem.dias.sexta.lift === prox.dias.segunda.lift) {
+      falhas.push('P5 ' + S(sem) + 'sexta=' + sem.dias.sexta.lift + ' e S' + prox.semana + ' segunda igual');
+    }
+  });
+  // 6. aproximacao
+  CICLO.forEach(function (sem, i) {
+    var ap = sem.grupo_em_aproximacao;
+    var prox = CICLO[(i + 1) % CICLO.length];
+    var esperado = GRUPO_ACC[prox.dias.segunda.lift];
+    var mau = [];
+    ['quinta', 'sexta'].forEach(function (d) {
+      exs(sem, d).forEach(function (e) {
+        if (e.grupo === ap && e.intensidade === 'pesado') mau.push(d + ': ' + e.nome);
+      });
+    });
+    if (ap !== esperado || mau.length) falhas.push('P6 ' + S(sem) + 'aproximacao ' + ap + ' (esperado ' + esperado + ') pesados=' + mau.join(', '));
+  });
+  // 7. bracos e gemeos
+  CICLO.forEach(function (sem) {
+    function nd(teste) { return DIAS.filter(function (d) { return exs(sem, d).some(teste); }).length; }
+    var nb = nd(function (e) { return e.grupo === 'biceps'; });
+    var nt = nd(function (e) { return e.grupo === 'triceps'; });
+    var ng = nd(function (e) { return e.grupo === 'gemeos'; });
+    var nbr = nd(function (e) { return e.categoria === 'braco'; });
+    if (!(nb === 2 && nt === 2 && ng === 2 && nbr === 4)) falhas.push('P7 ' + S(sem) + 'bi=' + nb + ' tri=' + nt + ' gem=' + ng + ' braco=' + nbr);
+  });
+  // 8. tetos
+  CICLO.forEach(function (sem) {
+    DIAS.forEach(function (d) {
+      var tot = 0, porg = {};
+      exs(sem, d).forEach(function (e) { tot += e.series.length; porg[e.grupo] = (porg[e.grupo] || 0) + e.series.length; });
+      var teto = d === 'segunda' ? P.regras.teto_series_dia_maximos : P.regras.teto_series_outros_dias;
+      var pior = Math.max.apply(null, Object.keys(porg).map(function (g) { return porg[g]; }));
+      if (tot > teto || pior > P.regras.max_series_por_grupo_por_dia) falhas.push('P8 ' + S(sem) + d + ': ' + tot + ' series (teto ' + teto + '), maior grupo ' + pior);
+    });
+  });
+  // 9. repetidos
+  TODAS.forEach(function (sem) {
+    DIAS.forEach(function (d, i) {
+      var nomes = exs(sem, d).filter(function (e) { return !e.foco; }).map(function (e) { return e.nome; });
+      var unicos = {};
+      nomes.forEach(function (n) { unicos[n] = 1; });
+      if (Object.keys(unicos).length !== nomes.length) falhas.push('P9 ' + S(sem) + d + ': repetido no proprio dia');
+      if (i > 0 && seguidos(DIAS[i - 1], d)) {
+        var ant = {};
+        exs(sem, DIAS[i - 1]).forEach(function (e) { if (!e.foco) ant[e.nome] = 1; });
+        var colados = Object.keys(unicos).filter(function (n) { return ant[n]; });
+        if (colados.length) falhas.push('P9 ' + S(sem) + d + ': ' + colados.sort().join(', ') + ' tambem ontem');
+      }
+    });
+  });
+  // 10. ordem
+  var ESCALAO = { perna: 1, empurrar: 1, puxar: 1, braco: 2, gemeos: 3, abs: 4 };
+  TODAS.forEach(function (sem) {
+    DIAS.forEach(function (d) {
+      var esc = exs(sem, d).map(function (e) { return e.foco ? 0 : ESCALAO[e.categoria]; });
+      for (var i = 1; i < esc.length; i++) {
+        if (esc[i] < esc[i - 1]) { falhas.push('P10 ' + S(sem) + d + ': ordem errada'); break; }
+      }
+    });
+  });
+  // 11. perna por lift
+  TODAS.forEach(function (sem) {
+    DIAS.forEach(function (d) {
+      var L = sem.dias[d].lift;
+      var n = exs(sem, d).filter(function (e) { return e.grupo === 'perna' && !e.foco; })
+        .reduce(function (s, e) { return s + e.series.length; }, 0);
+      if (n !== P.regras.perna_por_lift[L]) falhas.push('P11 ' + S(sem) + d + ' (' + L + '): ' + n + ', esperado ' + P.regras.perna_por_lift[L]);
+    });
+  });
+  // 12. abs
+  TODAS.forEach(function (sem) {
+    var diasAbs = DIAS.filter(function (d) { return exs(sem, d).some(function (e) { return e.categoria === 'abs'; }); });
+    if (diasAbs.join() !== P.regras.abs_dias.join()) falhas.push('P12 ' + S(sem) + 'abs em ' + diasAbs.join(','));
+  });
+  // 13. familias
+  var FAM = P.regras.familia_por_exercicio;
+  TODAS.forEach(function (sem) {
+    DIAS.forEach(function (d) {
+      var vistas = {};
+      exs(sem, d).forEach(function (e) {
+        var f = FAM[e.nome];
+        if (!f) return;
+        if (vistas[f]) falhas.push('P13 ' + S(sem) + d + ': ' + vistas[f] + ' + ' + e.nome + ' (ambos ' + f + ')');
+        vistas[f] = e.nome;
+      });
+    });
+  });
+  // 14. braco segue o lift
+  var ESPERA = { SUPINO: 'triceps', OMBRO: 'triceps', MORTO: 'biceps', AGACHAMENTO: 'biceps' };
+  TODAS.forEach(function (sem) {
+    DIAS.forEach(function (d) {
+      var gs = {};
+      exs(sem, d).forEach(function (e) { if (e.categoria === 'braco') gs[e.grupo] = 1; });
+      var want = ESPERA[sem.dias[d].lift];
+      if (Object.keys(gs).join() !== want) falhas.push('P14 ' + S(sem) + d + ': ' + (Object.keys(gs).join('+') || 'nenhum') + ', esperado ' + want);
+    });
+  });
+  // 15. interferencia
+  var SUB = P.regras.subgrupos, INT = P.regras.interferencia;
+  TODAS.forEach(function (sem) {
+    DIAS.forEach(function (d, i) {
+      var fora = {};
+      var reg = INT[sem.dias[d].lift];
+      if (reg) reg.dia.forEach(function (s) { fora[s] = 1; });
+      if (i + 1 < DIAS.length && seguidos(d, DIAS[i + 1])) {
+        reg = INT[sem.dias[DIAS[i + 1]].lift];
+        if (reg) reg.vespera.forEach(function (s) { fora[s] = 1; });
+      }
+      exs(sem, d).forEach(function (e) {
+        if (!e.foco && SUB[e.nome] && fora[SUB[e.nome]]) falhas.push('P15 ' + S(sem) + d + ': ' + e.nome + ' (' + SUB[e.nome] + ')');
+      });
+    });
+  });
+  // 16. sem series orfas
+  TODAS.forEach(function (sem) {
+    DIAS.forEach(function (d) {
+      exs(sem, d).forEach(function (e) {
+        if (!e.foco && e.series.length === 1 && e.categoria !== 'abs') falhas.push('P16 ' + S(sem) + d + ': ' + e.nome + ' com 1 serie');
+      });
+    });
+  });
+  // 17. reps
+  var LIMITE_REPS = {};
+  Object.keys(P.acessorios).forEach(function (n) { if (P.acessorios[n].series[0][1] === 10) LIMITE_REPS[n] = 10; });
+  TODAS.forEach(function (sem) {
+    DIAS.forEach(function (d) {
+      exs(sem, d).forEach(function (e) {
+        if (e.categoria === 'abs') return;
+        var n = e.series.length;
+        e.series.forEach(function (s, j) {
+          var backoff = e.foco && e.modo === 'maximos' && j === n - 1;
+          var teto = d === 'sexta' ? 12 : (LIMITE_REPS[e.nome] || 8);
+          if (s[1] > teto && !backoff) falhas.push('P17 ' + S(sem) + d + ': ' + e.nome + ' serie ' + (j + 1) + ' com ' + s[1] + ' reps');
+        });
+      });
+    });
+  });
+  return falhas;
+}
+
+/* ---------------------------------------------------------------------------
+   Do plano para sessoes e series da app (o para_app.py)
+
+   As series entram com feita:false — plano, nao registo. Dias que ja tem
+   treino ficam de fora (choques). Um exercicio que a app nao conhece nao e
+   inventado: vai para emFalta e nada se grava, porque um plano a meio e pior
+   do que nenhum.
+   ------------------------------------------------------------------------- */
+
+var PLANO_NOME_NA_APP = {
+  'Peso morto convencional': 'Deadlift',
+  'Supino plano com barra': 'Flat Barbell Bench Press',
+  'Agachamento com barra livre': 'Barbell Squat',
+  'Press de ombro com barra': 'Barbell Shoulder Press'
+};
+
+function planoParaSessoes(plano, exercicios, sessoesExistentes, proxIds) {
+  var bib = {};
+  exercicios.forEach(function (e) { bib[e.nome] = e; });
+  var datas = {};
+  sessoesExistentes.forEach(function (s) { datas[s.data] = 1; });
+  var idSessao = proxIds.sessao, idSerie = proxIds.serie;
+  var sessoes = [], series = [], choques = [], emFalta = [];
+
+  plano.calendario.forEach(function (sem) {
+    plano.config.dias.forEach(function (dia) {
+      var d = sem.dias[dia];
+      d.exercicios.forEach(function (ex) {
+        var nome = PLANO_NOME_NA_APP[ex.nome] || ex.nome;
+        if (!bib[nome] && emFalta.indexOf(nome) === -1) emFalta.push(nome);
+      });
+    });
+  });
+  if (emFalta.length) return { sessoes: [], series: [], choques: [], emFalta: emFalta };
+
+  plano.calendario.forEach(function (sem) {
+    plano.config.dias.forEach(function (dia) {
+      var d = sem.dias[dia];
+      if (datas[d.data]) { choques.push(d.data); return; }
+      sessoes.push({ id: idSessao, data: d.data, inicio: null, fim: null,
+        notas: 'Semana ' + sem.semana + ' - ' + d.modo });
+      var ordem = 0;
+      d.exercicios.forEach(function (ex, i) {
+        var e = bib[PLANO_NOME_NA_APP[ex.nome] || ex.nome];
+        var porTempo = e.tipo === 'peso_tempo';
+        ex.series.forEach(function (s) {
+          series.push({ id: idSerie++, sessaoId: idSessao, exercicioId: e.id, data: d.data,
+            ordemExercicio: i, ordem: ordem++, peso: s[0],
+            reps: porTempo ? 0 : s[1], rir: null, tempoSeg: porTempo ? s[1] : null,
+            distancia: null, supersetId: null, recordeOriginal: false, nota: null,
+            feita: false });
+        });
+      });
+      idSessao++;
+    });
+  });
+  return { sessoes: sessoes, series: series, choques: choques, emFalta: [] };
+}
+
 /* ---------------------------------------------------------------------------
    Backup: as lojas que vao e vem, e juntar sem apagar
 

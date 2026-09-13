@@ -28,7 +28,9 @@ const NOMES = [
   'agregarPorPeriodo', 'mediaRir', 'progressaoExercicio', 'pesoPorDiaParaReps',
   'recuarDias', 'PERIODOS', 'intervaloDoPeriodo', 'filtrarPorIntervalo',
   'progressoDeObjetivo', 'estimarPesoParaReps', 'estimativasPorReps',
-  'LOJAS_BACKUP', 'juntarBackup'
+  'LOJAS_BACKUP', 'juntarBackup',
+  'PLANO_CONFIG_PADRAO', 'arredondarPy', 'escolherMax', 'escolherMin',
+  'gerarPlano', 'validarPlano', 'planoParaSessoes'
 ];
 
 function extrair() {
