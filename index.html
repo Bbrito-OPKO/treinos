@@ -2802,7 +2802,7 @@ function calcularSugestoes(ciclos, sessoes, series, exercicios, hoje, decididas)
    atualizada ou um alimento for editado, o que ja foi comido nao muda.
    ======================================================================== */
 
-var REFEICOES = ['Pequeno-almoço', 'Almoço', 'Lanche', 'Jantar', 'Extra'];
+var REFEICOES = ['Pequeno-almoço', 'Meio da manhã', 'Almoço', 'Lanche', 'Jantar', 'Ceia', 'Extra'];
 
 function normalizarTexto(s) {
   return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
@@ -3224,6 +3224,10 @@ var LOJAS_BACKUP = [
   'exercicios', 'sessoes', 'series', 'pesagens',
   'alimentos', 'refeicoes', 'comidas', 'avaliacoes', 'sugestoes'
 ];
+
+/* Definicoes que sao dados do Bruno e vao no backup. As outras ficam no
+   aparelho de proposito — e ai que mora a chave da IA. */
+var DEFINICOES_NO_BACKUP = ['planoCiclos', 'planoPausados', 'perfilDieta', 'planoAlimentar'];
 
 var IDENTIDADE_BACKUP = {
   exercicios: function (r) { return String(r.nome || '').trim().toLowerCase(); },
@@ -6796,7 +6800,13 @@ function aplicarImportacao(dados, origem, modo) {
   var antes = modo === 'juntar' ? Promise.resolve() : BD.limpar(aLimpar);
   avisar('A importar…');
   antes.then(function () {
-    return Promise.all(presentes.map(function (l) { return BD.guardarMuitos(l, dados[l]); }));
+    return Promise.all(presentes.map(function (l) { return BD.guardarMuitos(l, dados[l]); }))
+      .then(function () {
+        // so as definicoes da lista: nunca a chave da IA nem o que for do aparelho
+        return Promise.all((Array.isArray(dados.definicoes) ? dados.definicoes : []).filter(function (d) {
+          return d && DEFINICOES_NO_BACKUP.indexOf(d.chave) !== -1;
+        }).map(function (d) { return guardarDefinicao(d.chave, d.valor); }));
+      });
   }).then(function () {
     return carregarTudo();
   }).then(function () {
@@ -6831,6 +6841,8 @@ function exportarJson() {
   };
   // As definicoes ficam de fora de proposito: vai la morar a chave da IA.
   LOJAS_BACKUP.forEach(function (l) { backup[l] = Estado[l]; });
+  backup.definicoes = DEFINICOES_NO_BACKUP.filter(function (k) { return Estado.definicoes[k] !== undefined; })
+    .map(function (k) { return { chave: k, valor: Estado.definicoes[k] }; });
   descarregar('treinos-' + hojeIso() + '.json', JSON.stringify(backup), 'application/json');
   guardarDefinicao('ultimoBackup', hojeIso()).then(function () {
     avisar('Backup guardado');
