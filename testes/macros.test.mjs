@@ -146,6 +146,30 @@ test('ajustar -300 num plano com poucos hidratos entra a gordura; nunca abaixo d
   assert.equal(N.ajustarPlanoKcal([item('Almoço', 'Frango', 300, FRANGO)], 100), null, 'so proteina: nada a mexer');
 });
 
+test('ajustar com marcas: so os marcados; o "subir" so recebe quando e para acrescentar; sem gordura', () => {
+  const marcado = [
+    { ...item('Pequeno-almoço', 'Aveia', 45, AVEIA), ajustavel: true },
+    item('Almoço', 'Arroz', 150, ARROZ),                                  // arroz do almoco: nao mexe
+    { ...item('Jantar', 'Arroz', 150, ARROZ), ajustavel: true },
+    { ...item('Meio da manhã', 'Maçã', 150, { kcal: 64, p: 0.2, h: 13.4, g: 0.5 }), ajustavel: 'subir' },
+    item('Jantar', 'Azeite', 10, AZEITE),
+  ];
+  // +100: aveia 164,7 + arroz jantar 187,5 + maca 96 = 448,2 ; fator 1,2231
+  // aveia 45 -> 55 ; arroz 150 -> 183,5 -> 185 ; maca 150 -> 183,5 -> 185
+  const mais = N.ajustarPlanoKcal(marcado, 100);
+  assert.deepEqual(mais.mudancas.map(m => [m.refeicao, m.nome, m.antes, m.depois]),
+    [['Pequeno-almoço', 'Aveia', 45, 55], ['Jantar', 'Arroz', 150, 185], ['Meio da manhã', 'Maçã', 150, 185]]);
+  // -100: so aveia e arroz do jantar (352,2) ; fator 0,716 -> aveia 32,2 -> 30 ; arroz 107,4 -> 105
+  const menos = N.ajustarPlanoKcal(marcado, -100);
+  assert.deepEqual(menos.mudancas.map(m => [m.nome, m.refeicao, m.antes, m.depois]),
+    [['Aveia', 'Pequeno-almoço', 45, 30], ['Arroz', 'Jantar', 150, 105]]);
+  // muito para tirar: fica no minimo de 30% e nao vai a gordura nem ao arroz do almoco
+  const muito = N.ajustarPlanoKcal(marcado, -600);
+  assert.equal(muito.mudancas.some(m => m.nome === 'Azeite' || m.refeicao === 'Almoço'), false);
+  assert.deepEqual(muito.mudancas.map(m => m.depois), [15, 45]);
+  assert.equal(muito.itens.find(i => i.nome === 'Aveia').ajustavel, true, 'a marca fica no plano novo');
+});
+
 const perfilM = { ...perfil, objetivo: 'manter' };
 const base = (extra) => ({ perfil: perfilM, planoAlimentar: planoAlim, pesoAtual: 81, pesagens: [], comidas: [], avaliacoes: [], decididas: {}, ...extra });
 

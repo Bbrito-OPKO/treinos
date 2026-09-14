@@ -3087,17 +3087,24 @@ function tendenciaCintura(avaliacoes, ate, dias) {
     primeira: m[0].cintura, ultima: m[m.length - 1].cintura, medidas: m.length, dias: span };
 }
 
-/* Mexe `delta` kcal num plano pelas gramas. Primeiro os alimentos em que os
-   hidratos dao metade ou mais das kcal (arroz, massa, pao, aveia, fruta); a
-   proteina fica. Se for para tirar mais do que os hidratos tem, entram tambem
-   os de gordura. Gramas a 5 g, nunca abaixo de 30% do que eram. */
+/* Mexe `delta` kcal num plano pelas gramas.
+
+   Se o plano tem alimentos marcados como ajustaveis, so esses mexem — e a
+   escolha do Bruno (14/09): o arroz do jantar e a aveia do pequeno-almoco e do
+   lanche; o meio da manha esta marcado 'subir', so recebe quando e para
+   acrescentar. Sem marcas: os alimentos em que os hidratos dao metade ou mais
+   das kcal, e se for para tirar mais do que eles tem, entram os de gordura.
+   A proteina nunca mexe. Gramas a 5 g, nunca abaixo de 30% do que eram. */
 function ajustarPlanoKcal(itens, delta) {
   var copia = itens.map(_copia);
   function kcalDe(it) { return (it.por100.kcal || 0) * it.gramas / 100; }
   function domina(it, macro, fator) { return it.por100.kcal > 0 && (it.por100[macro] || 0) * fator >= 0.5 * it.por100.kcal; }
-  var alvo = copia.filter(function (it) { return domina(it, 'h', 4); });
+  var marcados = copia.some(function (it) { return it.ajustavel; });
+  var alvo = marcados
+    ? copia.filter(function (it) { return it.ajustavel === true || (delta > 0 && it.ajustavel === 'subir'); })
+    : copia.filter(function (it) { return domina(it, 'h', 4); });
   var base = alvo.reduce(function (s, it) { return s + kcalDe(it); }, 0);
-  if (delta < 0 && base * 0.7 < -delta) {
+  if (!marcados && delta < 0 && base * 0.7 < -delta) {
     alvo = alvo.concat(copia.filter(function (it) { return domina(it, 'g', 9) && alvo.indexOf(it) === -1; }));
     base = alvo.reduce(function (s, it) { return s + kcalDe(it); }, 0);
   }
@@ -7101,7 +7108,9 @@ function editarPlanoAlimentar(tipo) {
       return '<div class="centro crescer"><div style="font-weight:700;font-size:19px" class="nums">' + num(x[0], 0) +
         '</div><div class="mini fraco">' + x[1] + '</div></div>';
     }).join('') + '</div><p class="mini fraco" style="margin:10px 0 0">Seg, ter, qui e sex são dias de treino; ' +
-    'qua, sáb e dom de descanso. Mudar o plano conta a partir de hoje.</p></div>';
+    'qua, sáb e dom de descanso. Mudar o plano conta a partir de hoje. Os ajustes pelo peso só mexem ' +
+    'nos alimentos marcados <b>⇅ ajusta</b> (e nos <b>↑ só sobe</b> quando é para acrescentar); sem marcas, ' +
+    'mexem nos hidratos.</p></div>';
 
   REFEICOES.forEach(function (r) {
     var daRefeicao = itens.map(function (it, i) { return [it, i]; }).filter(function (x) { return x[0].refeicao === r; });
@@ -7109,7 +7118,10 @@ function editarPlanoAlimentar(tipo) {
       daRefeicao.map(function (x) {
         var it = x[0], m = macrosDe(it.por100, it.gramas);
         return '<div class="item"><div class="crescer"><div style="font-weight:600">' + esc(it.nome) + '</div>' +
-          '<div class="mini fraco">' + m.kcal + ' kcal · P ' + num(m.p) + '</div></div>' +
+          '<div class="mini fraco">' + m.kcal + ' kcal · P ' + num(m.p) + '</div>' +
+          '<button class="etiqueta" data-paajusta="' + x[1] + '" style="margin-top:4px' +
+            (it.ajustavel ? ';color:var(--azul)' : '') + '">' +
+            (it.ajustavel === true ? '⇅ ajusta' : it.ajustavel === 'subir' ? '↑ só sobe' : 'fixo') + '</button></div>' +
           '<input type="number" inputmode="decimal" data-pag="' + x[1] + '" value="' + it.gramas + '" ' +
             'style="width:72px;min-height:40px;border-radius:10px;padding:0 8px;background:var(--sup2);color:inherit;border:1px solid var(--borda);text-align:right"> g' +
           '<button class="fraco" data-paapagar="' + x[1] + '" style="font-size:20px;padding:0 4px" aria-label="tirar">&times;</button></div>';
@@ -7127,6 +7139,16 @@ function editarPlanoAlimentar(tipo) {
         var g = +inp.value;
         if (!(g > 0)) { avisar('Gramas em falta'); return; }
         itens[+inp.dataset.pag].gramas = g;
+        gravar(itens);
+      };
+    });
+    // fixo -> ajusta (sobe e desce) -> so sobe -> fixo
+    Array.prototype.forEach.call(c.querySelectorAll('[data-paajusta]'), function (b) {
+      b.onclick = function () {
+        var it = itens[+b.dataset.paajusta];
+        if (!it.ajustavel) it.ajustavel = true;
+        else if (it.ajustavel === true) it.ajustavel = 'subir';
+        else delete it.ajustavel;
         gravar(itens);
       };
     });
