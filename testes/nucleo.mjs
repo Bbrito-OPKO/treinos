@@ -25,6 +25,7 @@ const NOMES = [
   'serieFeita', 'importarFitNotes', 'reordenarExercicios',
   'detetarRecordes', 'melhoresPorExercicio',
   'curvaRepMax', 'melhorPesoParaReps', 'recordesPorReps',
+  'curvaRepsPorPeso', 'melhorRepsParaPeso',
   'agregarPorPeriodo', 'mediaRir', 'progressaoExercicio', 'pesoPorDiaParaReps',
   'recuarDias', 'PERIODOS', 'intervaloDoPeriodo', 'filtrarPorIntervalo',
   'progressoDeObjetivo', 'estimarPesoParaReps', 'estimativasPorReps',

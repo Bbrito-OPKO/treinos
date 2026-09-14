@@ -1228,6 +1228,60 @@ function melhorPesoParaReps(curva, reps) {
   return p === undefined ? null : p;
 }
 
+/* --------------------------------------------------------------------------
+   Repeticoes maximas por peso (o inverso da curva de cima)
+
+   Aqui a pergunta e ao contrario: para um peso P, quantas repeticoes e que
+   ja se fez com ESSE peso OU MAIS? Espelha a mesma regra "ou mais" da curva
+   de cima (quem levanta 111,5 kg a 8 reps tambem "levantou" 100 kg a 8 reps
+   pelo caminho), so que trocando o eixo — aqui o eixo fixo e o peso.
+   ----------------------------------------------------------------------- */
+
+/* A curva completa: para cada peso ja levantado, o maximo de reps feito com
+   esse peso ou mais. Guardada como dois arrays paralelos, pesos[] a SUBIR
+   (para pesquisa binaria) e reps[] com o valor acumulado em cada peso. */
+function curvaRepsPorPeso(series, exercicioId) {
+  var uteis = series.filter(function (s) {
+    return s.exercicioId === exercicioId && serieFeita(s) &&
+      Number.isFinite(s.peso) && s.peso > 0 &&
+      Number.isFinite(s.reps) && s.reps >= 1;
+  });
+  if (!uteis.length) return { pesos: [], reps: [] };
+
+  var porPeso = {};
+  uteis.forEach(function (s) {
+    if (!porPeso[s.peso]) porPeso[s.peso] = [];
+    porPeso[s.peso].push(s);
+  });
+  // Percorre-se do peso mais pesado para o mais leve: a cada peso que desce,
+  // o conjunto "peso >= P" so pode ganhar series, nunca perder — por isso o
+  // maximo de reps acumulado e sempre nao decrescente a medida que se desce.
+  var pesosDesc = Object.keys(porPeso).map(Number).sort(function (a, b) { return b - a; });
+  var pesos = [], reps = [], melhorReps = 0;
+  pesosDesc.forEach(function (p) {
+    porPeso[p].forEach(function (s) { if (s.reps > melhorReps) melhorReps = s.reps; });
+    pesos.push(p);
+    reps.push(melhorReps);
+  });
+  pesos.reverse(); reps.reverse();   // agora a subir, para a pesquisa binaria
+  return { pesos: pesos, reps: reps };
+}
+
+/* As reps a bater para um dado peso: o maximo de reps ja feito com esse peso
+   ou mais. Como o peso pedido pode nao coincidir com nenhum peso ja
+   levantado, procura-se o menor peso da curva que ja seja >= ao pedido — a
+   funcao e uma escada (so muda de valor exactamente nos pesos ja feitos). */
+function melhorRepsParaPeso(curva, peso) {
+  if (!curva || !Number.isFinite(peso) || peso <= 0 || !curva.pesos.length) return null;
+  var lo = 0, hi = curva.pesos.length - 1, idx = -1;
+  while (lo <= hi) {
+    var mid = (lo + hi) >> 1;
+    if (curva.pesos[mid] >= peso) { idx = mid; hi = mid - 1; }
+    else lo = mid + 1;
+  }
+  return idx === -1 ? null : curva.reps[idx];
+}
+
 /* Uma linha por numero de repeticoes que ja foi feito, com o valor da curva.
    Nao se inventam linhas para repeticoes que nunca se fizeram. */
 function recordesPorReps(series, exercicioId) {
@@ -3641,6 +3695,7 @@ function reindexar() {
   Estado._recordes = null;
   Estado._melhores = null;
   Estado._curvas = null;
+  Estado._curvasPeso = null;
   Estado._marcas = null;
 }
 
@@ -4308,6 +4363,15 @@ function curvaDe(exercicioId) {
   return Estado._curvas[exercicioId];
 }
 
+/* Curva inversa (reps maximas por peso), tambem guardada — mesma razao. */
+function curvaPesoDe(exercicioId) {
+  if (!Estado._curvasPeso) Estado._curvasPeso = {};
+  if (!Estado._curvasPeso[exercicioId]) {
+    Estado._curvasPeso[exercicioId] = curvaRepsPorPeso(Estado.series, exercicioId);
+  }
+  return Estado._curvasPeso[exercicioId];
+}
+
 /* As linhas de carga maxima de um exercicio, tambem guardadas. */
 function marcasDe(exercicioId) {
   if (!Estado._marcas) Estado._marcas = {};
@@ -4345,7 +4409,7 @@ function linhaEditavel(s, n, pr, tipo) {
     return linhaDeSerie(s, n, pr);
   }
 
-  var marca = melhorPesoParaReps(curvaDe(s.exercicioId), s.reps);
+  var marca = melhorRepsParaPeso(curvaPesoDe(s.exercicioId), s.peso);
   var feita = estaFeita(s);
 
   return '<div class="serie-ed' + (feita ? '' : ' porfazer') + (pr ? ' recorde' : '') +
@@ -4366,15 +4430,17 @@ function linhaEditavel(s, n, pr, tipo) {
       Number.isFinite(s.rir) ? s.rir : null) +
 
     '<div class="marca' + (marca === null ? ' nada' : '') + '" data-campo="marca">' +
-      textoDaMarca(s.reps, marca) + '</div>' +
+      textoDaMarca(s.peso, marca) + '</div>' +
     '</div>';
 }
 
 /* O texto da marca a bater, por baixo da linha. */
-function textoDaMarca(reps, marca) {
-  if (!Number.isFinite(reps) || reps < 1) return 'máx —';
-  if (marca === null) return 'máx a ' + plural(reps, 'rep', 'reps') + ': ainda nenhuma';
-  return 'máx a ' + plural(reps, 'rep', 'reps') + ': ' + kg(marca);
+/* O texto da marca a bater, por baixo da linha. Ao contrario: para o peso
+   que esta na caixa, quantas repeticoes ja se fizeram com esse peso ou mais. */
+function textoDaMarca(peso, marca) {
+  if (!Number.isFinite(peso) || peso <= 0) return 'máx —';
+  if (marca === null) return 'máx a ' + kg(peso) + ': ainda nenhuma';
+  return 'máx a ' + kg(peso) + ': ' + plural(marca, 'rep', 'reps');
 }
 
 /* Liga os campos das linhas editaveis. Grava a cada alteracao: nao ha botao
@@ -4393,8 +4459,8 @@ function ligarLinhasEditaveis() {
 
     function actualizarMarca() {
       var alvo = linha.querySelector('[data-campo="marca"]');
-      var marca = melhorPesoParaReps(curvaDe(s.exercicioId), s.reps);
-      alvo.textContent = textoDaMarca(s.reps, marca);
+      var marca = melhorRepsParaPeso(curvaPesoDe(s.exercicioId), s.peso);
+      alvo.textContent = textoDaMarca(s.peso, marca);
       alvo.classList.toggle('nada', marca === null);
     }
 
@@ -4409,6 +4475,7 @@ function ligarLinhasEditaveis() {
           var novo = (Number.isFinite(s.peso) ? s.peso : 0) + delta;
           s.peso = Math.max(0, Math.round(novo * 100) / 100);
           el.value = s.peso;
+          actualizarMarca();
 
         } else if (campo === 'reps') {
           // Para em 1 e nao desce a vazio: carregar uma vez a mais no menos
@@ -4420,7 +4487,6 @@ function ligarLinhasEditaveis() {
             s.reps = Math.max(1, s.reps + delta);
           }
           el.value = s.reps === null ? '' : s.reps;
-          actualizarMarca();
 
         } else {
           // RIR: de vazio, o mais poe 0. O menos a partir do 0 volta a vazio,
@@ -4459,6 +4525,7 @@ function ligarLinhasEditaveis() {
       s.peso = Number.isFinite(v) ? v : 0;
       this.value = s.peso;
       guardar(false);
+      actualizarMarca();
     };
 
     campoReps.onchange = function () {
@@ -4466,7 +4533,6 @@ function ligarLinhasEditaveis() {
       s.reps = Number.isFinite(v) && v > 0 ? v : null;
       this.value = s.reps === null ? '' : s.reps;
       guardar(false);
-      actualizarMarca();
     };
 
     campoRir.onchange = function () {
