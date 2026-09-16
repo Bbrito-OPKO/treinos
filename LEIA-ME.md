@@ -227,6 +227,25 @@ treino (planeado e feito, com RIR), pesagens, cintura, plano alimentar — ao
 `claude-opus-5`, e cada pedido custa alguns cêntimos. As sugestões voltam com o
 mesmo Aceitar / Ignorar das regras, com "IA ·" no título.
 
+### Pelo Hermes no Vostro (sem custo)
+
+**Definições → Revisão por IA → Pelo Hermes no Vostro** (interruptor). A app
+manda o pedido a `https://vostro.tail7df465.ts.net/treinos-ia` (só dentro do
+Tailscale), e o Vostro corre `hermes -z` com a subscrição do Claude. Precisa do
+Vostro ligado e do Tailscale ativo no telemóvel. Uma revisão demora 30-40 s.
+
+A ponte é `vostro/ia_hermes.js` (node, sem dependências, porta 8813, só
+127.0.0.1). Só aceita a origem da app (GitHub Pages); o Hermes corre em
+`--safe-mode -t clarify` — sem terminal, ficheiros, browser nem MCP, portanto a
+revisão não mexe em nada. Um pedido de cada vez, teto de 240 s e de 30 000
+caracteres. Log em `%LOCALAPPDATA%\TreinosIA\ia_hermes.log`.
+
+Fica de pé pela tarefa `Treinos_IA_Hermes` (de 5 em 5 min corre
+`vostro/arrancar_ia_hermes.vbs`; se já há uma viva, a nova vê a porta ocupada e
+sai). O caminho no Tailscale criou-se com
+`tailscale serve --bg --set-path /treinos-ia http://127.0.0.1:8813` (no
+PowerShell: o Git Bash estraga o `/treinos-ia`).
+
 A IA só pode propor o que a app já sabe aplicar, e a app confere tudo antes de
 mostrar. O que não passa aparece numa linha "a app recusou …, e porquê".
 

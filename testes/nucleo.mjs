@@ -41,7 +41,7 @@ const NOMES = [
   'pesoMedio', 'tendenciaPeso', 'diasComComida', 'gastoMedido', 'resumoTreinoSemana', 'sugerirDieta',
   'tipoDeDia', 'versaoDoPlano', 'planoAtualAlimentar', 'totaisDeItens', 'consumoDoDia', 'tendenciaCintura', 'ajustarPlanoKcal',
   'DEFINICOES_NO_BACKUP', 'IA_MODELO', 'IA_ESQUEMA', 'iaCabecalhos', 'resumoParaIA', 'pedidoIA', 'erroIA',
-  'aplicarDietaGramas', 'lerRespostaIA'
+  'aplicarDietaGramas', 'lerRespostaIA', 'pedidoHermes', 'lerTextoIA', 'HERMES_URL_PADRAO'
 ];
 
 function extrair() {

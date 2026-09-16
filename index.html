@@ -3531,8 +3531,27 @@ function lerRespostaIA(resposta, ctx) {
   if (resposta.stop_reason === 'max_tokens') return { erro: 'A resposta foi cortada a meio. Tenta outra vez.' };
   var texto = resposta.content.filter(function (b) { return b.type === 'text'; })
     .map(function (b) { return b.text; }).join('');
+  return lerTextoIA(texto, ctx);
+}
+
+/* --- Pelo Hermes no Vostro (a subscricao do Claude, sem chave) -------------
+   O Hermes nao tem saida estruturada: o esquema vai no texto do pedido, e a
+   resposta pode vir com ``` ou uma frase antes. Tira-se o objeto JSON de la de
+   dentro e o resto e igual — as mesmas recusas com motivo. */
+var HERMES_URL_PADRAO = 'https://vostro.tail7df465.ts.net/treinos-ia';
+
+function pedidoHermes(resumo, area) {
+  var p = pedidoIA(resumo, area);
+  return p.system + '\n\n' + p.messages[0].content +
+    '\n\nResponde APENAS com um objeto JSON, sem texto antes nem depois, que valide este JSON Schema ' +
+    '(todos os campos em cada sugestão; os que não se usam vão "" ou 0):\n' + JSON.stringify(IA_ESQUEMA);
+}
+
+function lerTextoIA(texto, ctx) {
+  texto = String(texto || '');
+  var i = texto.indexOf('{'), j = texto.lastIndexOf('}');
   var dados;
-  try { dados = JSON.parse(texto); } catch (e) { return { erro: 'A IA não respondeu no formato combinado.' }; }
+  try { dados = i === -1 || j < i ? null : JSON.parse(texto.slice(i, j + 1)); } catch (e) { dados = null; }
   if (!dados || !Array.isArray(dados.sugestoes)) return { erro: 'A IA não respondeu no formato combinado.' };
 
   var hoje = ctx.hoje, cfg = ctx.cfg;
@@ -6852,7 +6871,15 @@ function cartaoDescanso() {
 /* --- IA opcional: a chave fica so neste aparelho (fora do backup) --- */
 function cartaoIA() {
   var chave = Estado.definicoes.chaveIA;
+  var hermes = !!Estado.definicoes.iaHermes;
   return '<div class="cartao"><h3>Revisão por IA (opcional)</h3>' +
+    '<div class="linha entre" style="gap:12px">' +
+      '<div class="crescer"><div style="font-weight:600">Pelo Hermes no Vostro</div>' +
+      '<div class="mini fraco">Usa a tua subscrição do Claude, sem custo. Precisa do Vostro ligado e do Tailscale ativo.</div></div>' +
+      '<button class="interruptor' + (hermes ? ' on' : '') + '" id="iaHermes" role="switch" aria-checked="' + hermes + '"><span></span></button>' +
+    '</div>' +
+    (hermes ? '<button class="btn larga fina" id="iaHermesTestar" style="margin-top:10px">Testar a ligação</button>' : '') +
+    '<div class="mini fraco" style="margin:14px 0 8px">Ou com uma chave da API (paga):</div>' +
     (chave
       ? '<div class="linha entre pequeno"><span class="suave">Chave guardada</span><b>…' + esc(String(chave).slice(-4)) + '</b></div>' +
         '<div class="linha" style="gap:8px;margin-top:10px">' +
@@ -6861,8 +6888,8 @@ function cartaoIA() {
       : '<label class="campo" style="margin-bottom:8px"><span>Chave da API da Anthropic</span>' +
           '<input id="iaChave" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sk-ant-…"></label>' +
         '<button class="btn primaria larga fina" id="iaGuardar">Guardar</button>') +
-    '<p class="mini fraco" style="margin:12px 0 0">Com chave, aparece "Pedir revisão à IA" no Plano e na ' +
-    'Avaliação da semana. Cada pedido custa alguns cêntimos na tua conta da Anthropic. A chave fica só ' +
+    '<p class="mini fraco" style="margin:12px 0 0">Com o Hermes ou com chave, aparece "Pedir revisão à IA" no Plano e na ' +
+    'Avaliação da semana. Com a chave, cada pedido custa alguns cêntimos na tua conta da Anthropic. A chave fica só ' +
     'neste telemóvel: não vai no backup nem sai para lado nenhum além da API. Sem chave, a app funciona igual.</p></div>';
 }
 
@@ -6944,6 +6971,17 @@ function ligarDefinicoes() {
     });
   };
 
+  $('#iaHermes').onclick = function () {
+    guardarDefinicao('iaHermes', !Estado.definicoes.iaHermes).then(render);
+  };
+  if ($('#iaHermesTestar')) $('#iaHermesTestar').onclick = function () {
+    var b = this;
+    b.disabled = true; b.textContent = 'A testar…';
+    chamarHermes('/saude', null, 20000)
+      .then(function (r) { avisar(r.hermes ? 'O Vostro responde e o Hermes está lá' : 'O Vostro responde, mas não encontra o Hermes'); })
+      .catch(function (e) { avisar(e.message); })
+      .then(function () { b.disabled = false; b.textContent = 'Testar a ligação'; });
+  };
   if ($('#iaGuardar')) $('#iaGuardar').onclick = function () {
     var v = $('#iaChave').value.trim();
     if (!/^sk-ant-/.test(v)) { avisar('A chave começa por sk-ant-'); return; }
@@ -7680,7 +7718,7 @@ function medirCinturaFolha() {
           '<button class="btn fina crescer" data-dtignorar="' + i + '">Ignorar</button></div></div>';
       }).join('') + '</div>'
     : '<p class="mini fraco" style="margin-top:14px">Sem sugestões esta semana.</p>';
-  if (Estado.definicoes.chaveIA) {
+  if (iaLigada()) {
     html += '<button class="btn larga fina" id="ciIA" style="margin-top:12px;color:var(--azul)">Pedir revisão à IA</button>' +
       '<div style="margin-top:12px">' + htmlRecusadasIA('comida') + '</div>';
   }
@@ -8098,6 +8136,33 @@ function chamarIA(corpo, limiteMs) {
       function (e) { clearTimeout(relogio); throw e; });
 }
 
+function iaLigada() {
+  return !!(Estado.definicoes.iaHermes || Estado.definicoes.chaveIA);
+}
+
+function chamarHermes(rota, corpo, limiteMs) {
+  var url = (Estado.definicoes.iaHermesUrl || HERMES_URL_PADRAO) + rota;
+  var ctl = typeof AbortController === 'function' ? new AbortController() : null;
+  var relogio = ctl ? setTimeout(function () { ctl.abort(); }, limiteMs) : null;
+  var opcoes = corpo
+    ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(corpo) }
+    : { method: 'GET' };
+  if (ctl) opcoes.signal = ctl.signal;
+  return fetch(url, opcoes)
+    .catch(function (e) {
+      throw new Error(e && e.name === 'AbortError' ? 'O Hermes demorou demasiado. Tenta outra vez.'
+        : 'Não chego ao Vostro. Está ligado, e o Tailscale está ativo no telemóvel?');
+    })
+    .then(function (r) {
+      return r.json().catch(function () { return null; }).then(function (j) {
+        if (!r.ok) throw new Error((j && j.erro) || ('O Vostro respondeu ' + r.status));
+        return j;
+      });
+    })
+    .then(function (x) { clearTimeout(relogio); return x; },
+      function (e) { clearTimeout(relogio); throw e; });
+}
+
 function pedirRevisaoIA(area, botao) {
   var hoje = hojeIso();
   var ca = cicloAtual(mapaDoPlano(ciclosDoPlano(), Estado.sessoes));
@@ -8108,11 +8173,16 @@ function pedirRevisaoIA(area, botao) {
     pesagens: Estado.pesagens, avaliacoes: Estado.avaliacoes,
     perfil: Estado.definicoes.perfilDieta || null, planoAlimentar: Estado.definicoes.planoAlimentar || null });
   var texto = botao ? botao.textContent : '';
-  if (botao) { botao.disabled = true; botao.textContent = 'A IA está a rever… (até 2 min)'; }
-  return chamarIA(pedidoIA(resumo, area))
-    .then(function (resposta) {
-      var lido = lerRespostaIA(resposta, { hoje: hoje, cfg: cfg, pausados: pausados,
-        planoAlimentar: Estado.definicoes.planoAlimentar || null, area: area });
+  var ctx = { hoje: hoje, cfg: cfg, pausados: pausados,
+    planoAlimentar: Estado.definicoes.planoAlimentar || null, area: area };
+  var pelaHermes = !!Estado.definicoes.iaHermes;
+  if (botao) { botao.disabled = true; botao.textContent = (pelaHermes ? 'O Hermes' : 'A IA') + ' está a rever… (até 4 min)'; }
+  var pedido = pelaHermes
+    ? chamarHermes('/rever', { prompt: pedidoHermes(resumo, area) }, 280000)
+        .then(function (r) { return lerTextoIA(r.texto, ctx); })
+    : chamarIA(pedidoIA(resumo, area)).then(function (resposta) { return lerRespostaIA(resposta, ctx); });
+  return pedido
+    .then(function (lido) {
       if (lido.erro) throw new Error(lido.erro);
       var todas = _copia(Estado.definicoes.sugestoesIA || {});
       todas[area] = { data: hoje, sugestoes: lido.sugestoes, recusadas: lido.recusadas };
@@ -8221,7 +8291,7 @@ function renderPlano() {
   var sugestoes = sugestoesAbertas();
 
   var html = htmlSugestoes(sugestoes) + htmlRecusadasIA('treino') +
-    (Estado.definicoes.chaveIA
+    (iaLigada()
       ? '<button class="btn larga fina" id="plIA" style="margin-bottom:12px;color:var(--azul)">Pedir revisão à IA</button>' : '') +
     '<div class="cartao" style="margin-top:0"><div class="linha entre">' +
     '<div><div style="font-size:20px;font-weight:700">Ciclo ' + ca.numero + '</div>' +

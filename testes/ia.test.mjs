@@ -235,3 +235,40 @@ test('nenhuma chave escrita no codigo (o repo e publico)', () => {
     assert.ok(!/sk-ant-[A-Za-z0-9_-]{8,}/.test(t), f);
   }
 });
+
+/* --- pelo Hermes (texto livre, sem saida estruturada) --- */
+
+test('hermes: o pedido leva as regras, o resumo e o esquema', () => {
+  const t = N.pedidoHermes({ hoje: HOJE, acessorios: [{ nome: 'Leg Press' }] }, 'comida');
+  assert.ok(t.startsWith('És o treinador'));
+  assert.match(t, /Foca-te na alimentação/);
+  assert.match(t, /"nome":"Leg Press"/);
+  assert.ok(t.includes(JSON.stringify(N.IA_ESQUEMA)), 'o esquema vai no texto');
+  assert.ok(t.length < 30000, 'cabe na linha de comando do Windows');
+});
+
+test('hermes: le o JSON mesmo com frase antes ou cercas de codigo', () => {
+  const json = JSON.stringify({ sugestoes: [sug({ tipo: 'carga', nome: 'Leg Press', novo_kg: 115 })] });
+  const cerca = String.fromCharCode(96).repeat(3);
+  for (const texto of [json, 'Aqui vai:\n' + json, cerca + 'json\n' + json + '\n' + cerca + '\n']) {
+    const r = N.lerTextoIA(texto, ctxTreino());
+    assert.equal(r.sugestoes.length, 1, texto.slice(0, 20));
+    assert.equal(r.sugestoes[0].novo, 115);
+  }
+  assert.match(N.lerTextoIA('Não consigo ajudar.', ctxTreino()).erro, /formato/);
+  assert.match(N.lerTextoIA('{partido', ctxTreino()).erro, /formato/);
+  assert.match(N.lerTextoIA('', ctxTreino()).erro, /formato/);
+});
+
+test('hermes: o endereco e o do tailscale serve (tailnet), nunca um funnel publico', () => {
+  assert.match(N.HERMES_URL_PADRAO, /^https:\/\/[a-z0-9-]+\.[a-z0-9-]+\.ts\.net\/treinos-ia$/);
+});
+
+test('servidor da ponte: so a origem da app, safe-mode e toolset inofensivo', () => {
+  const src = fs.readFileSync(path.join(RAIZ, 'vostro', 'ia_hermes.js'), 'utf8');
+  assert.match(src, /'--safe-mode'/);
+  assert.match(src, /'-t', 'clarify'/);
+  assert.match(src, /listen\(PORTA, '127\.0\.0\.1'/);
+  assert.match(src, /'https:\/\/bbrito-opko\.github\.io'/);
+  assert.match(src, /if \(!permitida\)/);
+});
