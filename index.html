@@ -3324,6 +3324,286 @@ function juntarBackup(atual, backup) {
 }
 
 /* ===========================================================================
+   F5: revisao pela IA (opcional)
+
+   A IA ve um resumo (4 semanas de treino, pesagens, cintura, plano alimentar)
+   e devolve sugestoes no MESMO formato das regras. Nada entra sem passar por
+   aqui: o que nao se consegue aplicar com as funcoes que ja existem, ou que
+   parte uma das 17 provas do plano, e recusado e diz-se porque. Sem chave, a
+   app nao muda nada.
+
+   A chave nunca esta no codigo (o repo e publico) nem no backup: vive so nas
+   definicoes do aparelho, fora de DEFINICOES_NO_BACKUP.
+   ------------------------------------------------------------------------- */
+
+var IA_MODELO = 'claude-opus-5';
+var IA_URL = 'https://api.anthropic.com/v1/messages';
+var IA_TIPOS = ['carga', 'estagnado', 'descarga', 'dieta-gramas', 'nota'];
+/* Tetos de seguranca: uma sugestao da IA que mexa mais do que isto e recusada. */
+var IA_MAX_CARGA = 0.25;    // 25% da carga atual de um acessorio
+var IA_MAX_GRAMAS = 0.5;    // 50% das gramas de um alimento do plano
+
+function iaCabecalhos(chave) {
+  return {
+    'content-type': 'application/json',
+    'x-api-key': chave,
+    'anthropic-version': '2023-06-01',
+    'anthropic-beta': 'server-side-fallback-2026-07-01',
+    // Chamada direta do telemovel, sem servidor: a API so aceita com isto.
+    'anthropic-dangerous-direct-browser-access': 'true'
+  };
+}
+
+/* O que a IA precisa de saber, sem ids nem nada que so a app entende. */
+function resumoParaIA(d) {
+  var hoje = d.hoje, desde = _somarDias(hoje, -28);
+  var nomeEx = {};
+  (d.exercicios || []).forEach(function (e) { nomeEx[e.id] = e.nome; });
+  var porSessao = _seriesPorSessao(d.series || []);
+  var mapa = mapaDoPlano(d.ciclos, d.sessoes || []);
+  var dias = _diasDoMapa(mapa).filter(function (x) { return x.data >= desde && x.data < hoje; });
+
+  var treinos = dias.map(function (x) {
+    var feitas = (x.sessao ? porSessao[x.sessao.id] || [] : []).filter(serieFeita)
+      .sort(function (a, b) { return a.ordem - b.ordem; });
+    var porEx = {}, ordem = [];
+    feitas.forEach(function (s) {
+      var n = nomeEx[s.exercicioId] || '?';
+      if (!porEx[n]) { porEx[n] = []; ordem.push(n); }
+      porEx[n].push(num_(s.peso) + 'x' + s.reps + (Number.isFinite(s.rir) ? ' RIR' + s.rir : ''));
+    });
+    return {
+      data: x.data, dia: x.dia, lift: x.lift, modo: x.modo,
+      estado: !feitas.length ? 'nao feito' : 'feito',
+      planeado: x.exercicios.map(function (e) {
+        return e.nome + ' ' + e.series.map(function (s) { return num_(s[0]) + 'x' + s[1]; }).join(', ');
+      }),
+      feito: ordem.map(function (n) { return n + ': ' + porEx[n].join(', '); })
+    };
+  });
+
+  var cfg = d.cfg;
+  var plano = planoAtualAlimentar(d.planoAlimentar);
+  function itensPlano(itens) {
+    return (itens || []).map(function (it) {
+      return { refeicao: it.refeicao, alimento: it.nome, gramas: it.gramas,
+        ajustavel: it.ajustavel === true ? 'sim' : it.ajustavel === 'subir' ? 'so subir' : 'nao' };
+    });
+  }
+  var obj = d.perfil && OBJETIVOS[d.perfil.objetivo];
+  return {
+    hoje: hoje,
+    objetivo: obj ? obj.nome : 'sem objetivo definido',
+    lifts: cfg.lifts.map(function (L) { return { nome: cfg.nomeLift[L], maximo_kg: cfg.lift[L].max }; }),
+    acessorios: cfg.acc.map(function (a) { return { nome: a[0], grupo: a[1], kg: a[2] }; }),
+    fora_do_ciclo_seguinte: d.pausados || [],
+    treinos_4_semanas: treinos,
+    pesagens_4_semanas: (d.pesagens || []).filter(function (p) { return p.data >= desde && p.kg > 0; })
+      .map(function (p) { return p.data + ' ' + num_(p.kg) + ' kg'; }),
+    cintura_8_semanas: (d.avaliacoes || []).filter(function (a) { return a.data >= _somarDias(hoje, -56) && a.cintura > 0; })
+      .map(function (a) { return a.data + ' ' + num_(a.cintura) + ' cm'; }),
+    plano_alimentar: plano ? {
+      dia_de_treino: itensPlano(plano.treino), totais_treino: totaisDeItens(plano.treino || []),
+      dia_de_descanso: itensPlano(plano.descanso), totais_descanso: totaisDeItens(plano.descanso || [])
+    } : null
+  };
+}
+
+var IA_ESQUEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['sugestoes'],
+  properties: {
+    sugestoes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['tipo', 'titulo', 'detalhe', 'nome', 'novo_kg', 'plano', 'refeicao', 'gramas'],
+        properties: {
+          tipo: { type: 'string', enum: IA_TIPOS },
+          titulo: { type: 'string' },
+          detalhe: { type: 'string' },
+          nome: { type: 'string' },
+          novo_kg: { type: 'number' },
+          plano: { type: 'string', enum: ['treino', 'descanso', 'ambos', ''] },
+          refeicao: { type: 'string' },
+          gramas: { type: 'number' }
+        }
+      }
+    }
+  }
+};
+
+var IA_SISTEMA = [
+  'És o treinador e nutricionista do Bruno. Lês o resumo do treino e da alimentação dele e propões',
+  'ajustes concretos. Português europeu, frases curtas, sempre com o número que justifica a sugestão.',
+  '',
+  'O plano: full body segunda, terça, quinta e sexta (quarta é descanso), ciclos de 4 semanas;',
+  'segunda máximos, terça médio, quinta pesado, sexta leve. O RIR só está nos exercícios importantes.',
+  'Ele decide tudo: cada sugestão aparece com um botão. Menos é mais: só o que os dados sustentam,',
+  'no máximo 6, e nenhuma se estiver tudo bem.',
+  '',
+  'Tipos (os campos que não se usam vão vazios ou a 0):',
+  '- carga: mudar os kg de um acessório. nome = exatamente um nome de "acessorios"; novo_kg = a carga nova',
+  '  (múltiplo de 2,5; no máximo 25% de diferença). Os lifts principais não se mudam aqui.',
+  '- estagnado: tirar um acessório do ciclo seguinte. nome = um nome de "acessorios".',
+  '- descarga: os próximos 8 dias a -10% de carga, por fadiga visível nos dados.',
+  '- dieta-gramas: mudar as gramas de um alimento do plano alimentar. nome = exatamente o "alimento";',
+  '  refeicao = a refeição dele; plano = treino, descanso ou ambos (ambos só se as gramas forem iguais nos dois); gramas = as gramas novas',
+  '  (múltiplo de 5; no máximo 50% de diferença). Respeita "ajustavel": prefere os que dizem sim.',
+  '- nota: uma observação sem mudança automática (só titulo e detalhe).',
+  '',
+  'O detalhe cita os dados (datas, kg×reps, pesagens). Não inventes dados que não estão no resumo.'
+].join('\n');
+
+function pedidoIA(resumo, area) {
+  var foco = area === 'comida'
+    ? 'Foca-te na alimentação (tipos dieta-gramas e nota); o treino é contexto.'
+    : 'Foca-te no treino (tipos carga, estagnado, descarga e nota); a alimentação é contexto.';
+  return {
+    model: IA_MODELO,
+    max_tokens: 16000,
+    fallbacks: 'default',
+    system: IA_SISTEMA,
+    output_config: { format: { type: 'json_schema', schema: IA_ESQUEMA } },
+    messages: [{ role: 'user', content: foco + '\n\nResumo:\n' + JSON.stringify(resumo) }]
+  };
+}
+
+/* Mensagem curta para um erro HTTP da API. */
+function erroIA(status, corpo) {
+  var msg = corpo && corpo.error && corpo.error.message ? corpo.error.message : '';
+  if (status === 401) return 'A chave não foi aceite (401). Confirma-a nas Definições.';
+  if (status === 403) return 'A chave não tem acesso (403). ' + msg;
+  if (status === 429) return 'Limite de pedidos atingido (429). Tenta daqui a um bocado.';
+  if (status === 529 || status === 503) return 'A API está sobrecarregada (' + status + '). Tenta daqui a um bocado.';
+  if (status === 400) return 'Pedido recusado (400): ' + msg;
+  return 'Erro ' + status + (msg ? ': ' + msg : '');
+}
+
+/* Muda as gramas de um alimento no plano alimentar ATUAL. A UI volta a
+   chamar isto ao aceitar, para duas sugestoes aceites seguidas nao se
+   apagarem uma a outra (cada uma parte do plano que houver nesse momento). */
+function aplicarDietaGramas(planoAlimentar, m) {
+  var atual = planoAtualAlimentar(planoAlimentar);
+  if (!atual) return { erro: 'não há plano alimentar' };
+  var gramas = _arredondar(Number(m.gramas), 5);
+  if (!(gramas >= 5) || !Number.isFinite(gramas)) return { erro: 'gramas inválidas' };
+  var tipos = m.plano === 'treino' || m.plano === 'descanso' ? [m.plano] : ['treino', 'descanso'];
+  var novoPlano = { treino: _copia(atual.treino || []), descanso: _copia(atual.descanso || []) };
+  // Um so numero para os dois dias so faz sentido se os dois tiverem as mesmas
+  // gramas: 200 g no treino e 150 g no descanso a "180 g" baixava um e subia o outro.
+  var atuais = {};
+  tipos.forEach(function (t) {
+    novoPlano[t].forEach(function (it) {
+      if (it.nome === m.nome && (!m.refeicao || it.refeicao === m.refeicao)) atuais[it.gramas] = 1;
+    });
+  });
+  if (Object.keys(atuais).length > 1) {
+    return { erro: m.nome + ' tem gramas diferentes (' + Object.keys(atuais).join(' e ') + ' g): um dia de cada vez' };
+  }
+  var linhas = [], erro = null;
+  tipos.forEach(function (t) {
+    novoPlano[t].forEach(function (it) {
+      if (erro || it.nome !== m.nome || (m.refeicao && it.refeicao !== m.refeicao)) return;
+      if (Math.abs(gramas - it.gramas) > it.gramas * IA_MAX_GRAMAS + 1e-9) {
+        erro = it.nome + ' ' + it.gramas + ' → ' + gramas + ' g muda mais de 50%';
+        return;
+      }
+      if (it.ajustavel === 'subir' && gramas < it.gramas) { erro = it.nome + ' só pode subir'; return; }
+      if (gramas === it.gramas) return;
+      linhas.push((t === 'treino' ? 'Treino' : 'Descanso') + ' · ' + it.refeicao + ': ' + it.nome + ' ' + it.gramas + ' → ' + gramas + ' g');
+      it.gramas = gramas;
+    });
+  });
+  if (erro) return { erro: erro };
+  if (!linhas.length) return { erro: '"' + m.nome + '" não está no plano' + (m.refeicao ? ' em ' + m.refeicao : '') + ', ou já tem essas gramas' };
+  return { novoPlano: novoPlano, linhas: linhas, gramas: gramas };
+}
+
+/* Le a resposta da API e passa cada sugestao pelas mesmas regras da app.
+   ctx: { hoje, cfg, pausados, planoAlimentar, area }.
+   Devolve { erro } ou { sugestoes, recusadas }. */
+function lerRespostaIA(resposta, ctx) {
+  if (!resposta || !Array.isArray(resposta.content)) return { erro: 'Resposta vazia da API.' };
+  if (resposta.stop_reason === 'refusal') return { erro: 'A IA recusou este pedido.' };
+  if (resposta.stop_reason === 'max_tokens') return { erro: 'A resposta foi cortada a meio. Tenta outra vez.' };
+  var texto = resposta.content.filter(function (b) { return b.type === 'text'; })
+    .map(function (b) { return b.text; }).join('');
+  var dados;
+  try { dados = JSON.parse(texto); } catch (e) { return { erro: 'A IA não respondeu no formato combinado.' }; }
+  if (!dados || !Array.isArray(dados.sugestoes)) return { erro: 'A IA não respondeu no formato combinado.' };
+
+  var hoje = ctx.hoje, cfg = ctx.cfg;
+  var sugestoes = [], recusadas = [], usadas = {};
+  function recusar(s, motivo) { recusadas.push({ titulo: String(s.titulo || s.tipo || '?'), motivo: motivo }); }
+  function base(s, tipo, id) {
+    return { tipo: tipo, ia: true, chave: 'ia|' + tipo + '|' + id + '|' + hoje,
+      titulo: 'IA · ' + String(s.titulo || '').slice(0, 120), detalhe: String(s.detalhe || '').slice(0, 600) };
+  }
+  function planoPassa(novoCfg) {
+    try { return validarPlano(gerarPlano(novoCfg)).length === 0; } catch (e) { return false; }
+  }
+
+  dados.sugestoes.forEach(function (s) {
+    if (!s || IA_TIPOS.indexOf(s.tipo) === -1) return recusar(s || {}, 'tipo desconhecido');
+    var nome = String(s.nome || '').trim();
+    var acc = cfg.acc.filter(function (a) { return a[0] === nome; })[0];
+    var r;
+
+    if (s.tipo === 'carga') {
+      if (ctx.area === 'comida') return recusar(s, 'fora do foco pedido');
+      if (!acc) return recusar(s, '"' + nome + '" não é um acessório do plano');
+      if (!acc[2]) return recusar(s, nome + ' não tem carga no plano');
+      var novo = arredondarPy(Number(s.novo_kg) / 2.5) * 2.5;
+      if (!(novo >= 2.5) || !Number.isFinite(novo)) return recusar(s, 'carga inválida');
+      if (novo === acc[2]) return recusar(s, 'a carga já é essa');
+      if (Math.abs(novo - acc[2]) > acc[2] * IA_MAX_CARGA + 1e-9) {
+        return recusar(s, num_(acc[2]) + ' → ' + num_(novo) + ' kg muda mais de 25%');
+      }
+      // Os kg nao entram em nenhuma das 17 provas (sao so estrutura): nao ha o que validar aqui.
+      r = base(s, 'carga', nome);
+      r.nome = nome; r.antes = acc[2]; r.novo = novo;
+      r.titulo = 'IA · ' + nome + ': ' + num_(acc[2]) + ' → ' + num_(novo) + ' kg';
+    } else if (s.tipo === 'estagnado') {
+      if (ctx.area === 'comida') return recusar(s, 'fora do foco pedido');
+      if (!acc) return recusar(s, '"' + nome + '" não é um acessório do plano');
+      var pausados = ctx.pausados || [];
+      if (pausados.indexOf(nome) !== -1) return recusar(s, nome + ' já sai no ciclo seguinte');
+      var c3;
+      try { c3 = progredirConfig(cfg, _somarDias(cfg.dataInicio, 28), hoje, {}, pausados.concat([nome])); }
+      catch (e) { return recusar(s, 'o ciclo seguinte não se consegue gerar sem ' + nome); }
+      if (!planoPassa(c3)) return recusar(s, 'sem ' + nome + ' o ciclo seguinte falha as 17 provas');
+      r = base(s, 'estagnado', nome);
+      r.nome = nome;
+    } else if (s.tipo === 'descarga') {
+      if (ctx.area === 'comida') return recusar(s, 'fora do foco pedido');
+      r = base(s, 'descarga', 'semana');
+      r.depoisDe = _somarDias(hoje, -1);
+    } else if (s.tipo === 'dieta-gramas') {
+      if (ctx.area !== 'comida') return recusar(s, 'fora do foco pedido');
+      var m = { nome: nome, refeicao: String(s.refeicao || ''), plano: s.plano, gramas: Number(s.gramas) };
+      var ap = aplicarDietaGramas(ctx.planoAlimentar, m);
+      if (ap.erro) return recusar(s, ap.erro);
+      var tipos = m.plano === 'treino' || m.plano === 'descanso' ? [m.plano] : ['treino', 'descanso'];
+      m.gramas = ap.gramas;
+      r = base(s, 'dieta-plano', nome + '|' + (s.refeicao || '') + '|' + tipos.join('+'));
+      r.mudanca = m;
+      r.linhas = ap.linhas;
+      r.novoPlano = ap.novoPlano;
+    } else {
+      r = base(s, 'nota', String(s.titulo || '').slice(0, 40));
+      r.informativa = true;
+    }
+    if (usadas[r.chave]) return recusar(s, 'repetida');
+    usadas[r.chave] = 1;
+    sugestoes.push(r);
+  });
+  return { sugestoes: sugestoes, recusadas: recusadas };
+}
+
+/* ===========================================================================
    NÚCLEO:FIM
    ======================================================================== */
 
@@ -6536,6 +6816,7 @@ function renderDefinicoes() {
   $('#v-definicoes').innerHTML =
     cartaoDados() +
     cartaoDescanso() +
+    cartaoIA() +
     cartaoEcra() +
     cartaoVersao() +
     cartaoArmazenamento() +
@@ -6566,6 +6847,23 @@ function cartaoDescanso() {
     '<p class="mini fraco" style="margin:12px 0 0">Usado nos exercícios que não têm ' +
     'descanso próprio. Cada exercício pode ter o seu, e fica guardado sozinho quando ' +
     'mudas o valor no ecrã de registo.</p></div>';
+}
+
+/* --- IA opcional: a chave fica so neste aparelho (fora do backup) --- */
+function cartaoIA() {
+  var chave = Estado.definicoes.chaveIA;
+  return '<div class="cartao"><h3>Revisão por IA (opcional)</h3>' +
+    (chave
+      ? '<div class="linha entre pequeno"><span class="suave">Chave guardada</span><b>…' + esc(String(chave).slice(-4)) + '</b></div>' +
+        '<div class="linha" style="gap:8px;margin-top:10px">' +
+          '<button class="btn fina crescer" id="iaTestar">Testar</button>' +
+          '<button class="btn fina crescer" id="iaApagar" style="color:var(--vermelho)">Apagar</button></div>'
+      : '<label class="campo" style="margin-bottom:8px"><span>Chave da API da Anthropic</span>' +
+          '<input id="iaChave" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sk-ant-…"></label>' +
+        '<button class="btn primaria larga fina" id="iaGuardar">Guardar</button>') +
+    '<p class="mini fraco" style="margin:12px 0 0">Com chave, aparece "Pedir revisão à IA" no Plano e na ' +
+    'Avaliação da semana. Cada pedido custa alguns cêntimos na tua conta da Anthropic. A chave fica só ' +
+    'neste telemóvel: não vai no backup nem sai para lado nenhum além da API. Sem chave, a app funciona igual.</p></div>';
 }
 
 /* --- Versao --- */
@@ -6646,6 +6944,29 @@ function ligarDefinicoes() {
     });
   };
 
+  if ($('#iaGuardar')) $('#iaGuardar').onclick = function () {
+    var v = $('#iaChave').value.trim();
+    if (!/^sk-ant-/.test(v)) { avisar('A chave começa por sk-ant-'); return; }
+    guardarDefinicao('chaveIA', v).then(function () { avisar('Chave guardada'); render(); });
+  };
+  if ($('#iaTestar')) $('#iaTestar').onclick = function () {
+    var b = this;
+    b.disabled = true; b.textContent = 'A testar…';
+    chamarIA({ model: IA_MODELO, max_tokens: 1024, fallbacks: 'default',
+      messages: [{ role: 'user', content: 'Responde só: OK' }] }, 60000)
+      .then(function () { avisar('A chave funciona'); })
+      .catch(function (e) { avisar(e.message); })
+      .then(function () { b.disabled = false; b.textContent = 'Testar'; });
+  };
+  if ($('#iaApagar')) $('#iaApagar').onclick = function () {
+    var b = this;
+    if (!b.dataset.confirmar) { b.dataset.confirmar = '1'; b.textContent = 'Toca outra vez'; return; }
+    BD.apagar('definicoes', 'chaveIA').then(function () {
+      delete Estado.definicoes.chaveIA;
+      avisar('Chave apagada');
+      render();
+    });
+  };
   $('#dsGuardar').onclick = function () {
     var v = parseInt($('#dsValor').value, 10);
     if (!Number.isFinite(v) || v <= 0) { avisar('Valor inválido'); return; }
@@ -7333,7 +7654,7 @@ function medirCinturaFolha() {
     .sort(function (a, b) { return a.data < b.data ? 1 : -1; })[0];
   var tc = tendenciaCintura(Estado.avaliacoes, hoje, 28);
   var tp = tendenciaPeso(Estado.pesagens, hoje, 21);
-  var sug = sugerirDieta(dadosDieta(), hoje);
+  var sug = sugerirDieta(dadosDieta(), hoje).concat(sugestoesIA('comida'));
 
   var html = '<div class="cartao" style="margin-top:0">' +
       '<div class="linha entre pequeno"><span class="suave">Peso médio (7 dias)</span><b>' + (peso ? num(peso) + ' kg' : '—') + '</b></div>' +
@@ -7359,8 +7680,15 @@ function medirCinturaFolha() {
           '<button class="btn fina crescer" data-dtignorar="' + i + '">Ignorar</button></div></div>';
       }).join('') + '</div>'
     : '<p class="mini fraco" style="margin-top:14px">Sem sugestões esta semana.</p>';
+  if (Estado.definicoes.chaveIA) {
+    html += '<button class="btn larga fina" id="ciIA" style="margin-top:12px;color:var(--azul)">Pedir revisão à IA</button>' +
+      '<div style="margin-top:12px">' + htmlRecusadasIA('comida') + '</div>';
+  }
 
   abrirFolha('Avaliação da semana', html, function (c) {
+    if (c.querySelector('#ciIA')) c.querySelector('#ciIA').onclick = function () {
+      pedirRevisaoIA('comida', this).then(function (ok) { if (ok) { render(); medirCinturaFolha(); } });
+    };
     c.querySelector('#ciOk').onclick = function () {
       var cm = +c.querySelector('#ciCm').value;
       if (!(cm > 40 && cm < 200)) { avisar('Cintura em cm'); return; }
@@ -7378,8 +7706,15 @@ function medirCinturaFolha() {
     Array.prototype.forEach.call(c.querySelectorAll('[data-dtaceitar]'), function (b) {
       b.onclick = function () {
         var s = sug[+b.dataset.dtaceitar];
+        var novoPlano = s.novoPlano;
+        if (s.mudanca) {
+          // Da IA: refaz-se sobre o plano de AGORA, que pode ja ter outra sugestao aceite.
+          var ap = aplicarDietaGramas(Estado.definicoes.planoAlimentar, s.mudanca);
+          if (ap.erro) { avisar('Não aplico: ' + ap.erro); return; }
+          novoPlano = ap.novoPlano;
+        }
         b.disabled = true;
-        (s.novoPlano ? guardarVersaoPlano(s.novoPlano) : Promise.resolve())
+        (novoPlano ? guardarVersaoPlano(novoPlano) : Promise.resolve())
           .then(function () { return decidirSugestao(s, 'aceite'); })
           .then(function () {
             avisar(s.novoPlano ? 'Plano atualizado a partir de hoje' : 'Anotado');
@@ -7723,13 +8058,85 @@ function estadoDaSessao(sessao) {
 function sugestoesAbertas() {
   var decididas = {};
   Estado.sugestoes.forEach(function (s) { decididas[s.chave] = 1; });
+  var regras;
   try {
-    return calcularSugestoes(ciclosDoPlano(), Estado.sessoes, Estado.series, Estado.exercicios,
+    regras = calcularSugestoes(ciclosDoPlano(), Estado.sessoes, Estado.series, Estado.exercicios,
       hojeIso(), decididas);
   } catch (e) {
     console.warn('Sugestões:', e.message);
-    return [];
+    regras = [];
   }
+  return regras.concat(sugestoesIA('treino'));
+}
+
+/* --- IA: o pedido, e as sugestoes que voltam (guardadas so no aparelho) --- */
+function sugestoesIA(area) {
+  var guardadas = (Estado.definicoes.sugestoesIA || {})[area];
+  if (!guardadas) return [];
+  var decididas = {};
+  Estado.sugestoes.forEach(function (s) { decididas[s.chave] = 1; });
+  return guardadas.sugestoes.filter(function (s) { return !decididas[s.chave]; });
+}
+
+function chamarIA(corpo, limiteMs) {
+  var chave = Estado.definicoes.chaveIA;
+  if (!chave) return Promise.reject(new Error('Sem chave da IA nas Definições'));
+  var ctl = typeof AbortController === 'function' ? new AbortController() : null;
+  var relogio = ctl ? setTimeout(function () { ctl.abort(); }, limiteMs || 240000) : null;
+  return fetch(IA_URL, { method: 'POST', headers: iaCabecalhos(chave), body: JSON.stringify(corpo),
+    signal: ctl ? ctl.signal : undefined })
+    .catch(function (e) {
+      throw new Error(e && e.name === 'AbortError' ? 'A IA demorou demasiado. Tenta outra vez.' : 'Sem ligação à API.');
+    })
+    .then(function (r) {
+      return r.json().catch(function () { return null; }).then(function (corpoR) {
+        if (!r.ok) throw new Error(erroIA(r.status, corpoR));
+        return corpoR;
+      });
+    })
+    .then(function (x) { clearTimeout(relogio); return x; },
+      function (e) { clearTimeout(relogio); throw e; });
+}
+
+function pedirRevisaoIA(area, botao) {
+  var hoje = hojeIso();
+  var ca = cicloAtual(mapaDoPlano(ciclosDoPlano(), Estado.sessoes));
+  var cfg = ca.ciclo.cfg;
+  var pausados = Estado.definicoes.planoPausados || [];
+  var resumo = resumoParaIA({ hoje: hoje, ciclos: ciclosDoPlano(), cfg: cfg, pausados: pausados,
+    sessoes: Estado.sessoes, series: Estado.series, exercicios: Estado.exercicios,
+    pesagens: Estado.pesagens, avaliacoes: Estado.avaliacoes,
+    perfil: Estado.definicoes.perfilDieta || null, planoAlimentar: Estado.definicoes.planoAlimentar || null });
+  var texto = botao ? botao.textContent : '';
+  if (botao) { botao.disabled = true; botao.textContent = 'A IA está a rever… (até 2 min)'; }
+  return chamarIA(pedidoIA(resumo, area))
+    .then(function (resposta) {
+      var lido = lerRespostaIA(resposta, { hoje: hoje, cfg: cfg, pausados: pausados,
+        planoAlimentar: Estado.definicoes.planoAlimentar || null, area: area });
+      if (lido.erro) throw new Error(lido.erro);
+      var todas = _copia(Estado.definicoes.sugestoesIA || {});
+      todas[area] = { data: hoje, sugestoes: lido.sugestoes, recusadas: lido.recusadas };
+      return guardarDefinicao('sugestoesIA', todas).then(function () {
+        avisar(lido.sugestoes.length
+          ? plural(lido.sugestoes.length, 'sugestão', 'sugestões') + ' da IA' +
+            (lido.recusadas.length ? ' (' + lido.recusadas.length + ' recusadas pela app)' : '')
+          : 'A IA não sugere nada' + (lido.recusadas.length ? ' que a app aceite' : ''));
+        return true;
+      });
+    })
+    .catch(function (e) { avisar(e.message); return false; })
+    .then(function (ok) {
+      if (botao) { botao.disabled = false; botao.textContent = texto; }
+      return ok;
+    });
+}
+
+/* Linha com o que a app recusou da ultima revisao, e porque. */
+function htmlRecusadasIA(area) {
+  var g = (Estado.definicoes.sugestoesIA || {})[area];
+  if (!g || !g.recusadas || !g.recusadas.length) return '';
+  return '<p class="mini fraco" style="margin:-4px 0 12px">Revisão de ' + esc(dataCurta(g.data)) + ': a app recusou ' +
+    g.recusadas.map(function (r) { return esc(r.titulo) + ' (' + esc(r.motivo) + ')'; }).join('; ') + '.</p>';
 }
 
 function decidirSugestao(sug, estado) {
@@ -7772,6 +8179,8 @@ function aceitarSugestao(sug) {
   } else if (sug.tipo === 'estagnado') {
     var pausados = (Estado.definicoes.planoPausados || []).concat([sug.nome]);
     passo = guardarDefinicao('planoPausados', pausados).then(function () { return sug.nome + ' sai no ciclo seguinte'; });
+  } else if (sug.tipo === 'nota') {
+    passo = Promise.resolve('Anotado');
   } else {
     return;
   }
@@ -7792,7 +8201,7 @@ function htmlSugestoes(lista) {
         '<div style="font-weight:600">' + esc(s.titulo) + '</div>' +
         '<div class="mini fraco" style="margin:3px 0 10px">' + esc(s.detalhe) + '</div>' +
         '<div class="linha" style="gap:8px">' +
-          '<button class="btn primaria fina crescer" data-sugaceitar="' + i + '">Aceitar</button>' +
+          '<button class="btn primaria fina crescer" data-sugaceitar="' + i + '">' + (s.informativa ? 'Ok' : 'Aceitar') + '</button>' +
           '<button class="btn fina crescer" data-sugignorar="' + i + '">Ignorar</button>' +
         '</div></div>';
     }).join('') + '</div>';
@@ -7811,7 +8220,9 @@ function renderPlano() {
   var hoje = hojeIso();
   var sugestoes = sugestoesAbertas();
 
-  var html = htmlSugestoes(sugestoes) +
+  var html = htmlSugestoes(sugestoes) + htmlRecusadasIA('treino') +
+    (Estado.definicoes.chaveIA
+      ? '<button class="btn larga fina" id="plIA" style="margin-bottom:12px;color:var(--azul)">Pedir revisão à IA</button>' : '') +
     '<div class="cartao" style="margin-top:0"><div class="linha entre">' +
     '<div><div style="font-size:20px;font-weight:700">Ciclo ' + ca.numero + '</div>' +
     '<div class="mini fraco">' + esc(dataCurta(datasReais[0])) + ' a ' +
@@ -7856,6 +8267,9 @@ function renderPlano() {
 
   $('#v-plano').innerHTML = html;
   $('#plSeguinte').onclick = prepararCicloSeguinte;
+  if ($('#plIA')) $('#plIA').onclick = function () {
+    pedirRevisaoIA('treino', this).then(function (ok) { if (ok) render(); });
+  };
   Array.prototype.forEach.call(document.querySelectorAll('[data-sugaceitar]'), function (b) {
     b.onclick = function () { b.disabled = true; aceitarSugestao(sugestoes[+b.dataset.sugaceitar]); };
   });

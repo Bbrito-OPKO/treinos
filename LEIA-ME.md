@@ -214,6 +214,35 @@ Comida; Histórico, Exercícios e Definições dentro do Mais.
 
 ---
 
+## Revisão por IA (opcional)
+
+**Mais → Definições → Revisão por IA**: colar a chave da API da Anthropic
+(`sk-ant-…`). A chave fica **só neste telemóvel**: não vai no backup, não está no
+código (o repo é público) e só sai para `api.anthropic.com`. Sem chave, a app
+funciona igual e o botão nem aparece.
+
+Com chave, **Pedir revisão à IA** aparece no **Plano** (foco no treino) e na
+**Avaliação da semana** (foco na comida). A app manda um resumo — 4 semanas de
+treino (planeado e feito, com RIR), pesagens, cintura, plano alimentar — ao
+`claude-opus-5`, e cada pedido custa alguns cêntimos. As sugestões voltam com o
+mesmo Aceitar / Ignorar das regras, com "IA ·" no título.
+
+A IA só pode propor o que a app já sabe aplicar, e a app confere tudo antes de
+mostrar. O que não passa aparece numa linha "a app recusou …, e porquê".
+
+| Sugestão da IA | A app recusa se |
+|---|---|
+| Carga de um acessório | não é um acessório do plano; muda mais de 25%; é a mesma carga. Arredonda a 2,5 kg. |
+| Tirar um acessório | já sai; o ciclo seguinte sem ele falha as 17 provas. |
+| Semana mais leve | — (os 8 dias a partir de hoje a -10%) |
+| Gramas de um alimento | não está no plano (ou nessa refeição); muda mais de 50%; baixa um "só subir"; "ambos os dias" com gramas diferentes nos dois. Aceitar refaz a conta sobre o plano **de agora**, para duas aceites seguidas não se apagarem. |
+| Nota | — (só Ok / Ignorar) |
+
+As sugestões da última revisão ficam em `definicoes.sugestoesIA` (fora do backup).
+O CORS da API aceita a página (medido a 16/09: preflight 200 com os 5 cabeçalhos,
+e um 401 com chave falsa chega ao browser). **Por provar:** um pedido com a chave
+verdadeira e o tempo de resposta no iPhone. Nos testes e no browser a resposta foi simulada.
+
 ## O que está aqui dentro
 
 | Ficheiro | O que é |
