@@ -1089,12 +1089,16 @@ function reordenarExercicios(series, exercicioId, direcao) {
 
 /* A ordem de uma serie acrescentada a meio do treino: depois de todas as
    que o dia ja tem. Contar as series nao chega: tirar uma deixa um buraco na
-   numeracao, e a serie nova caia no meio do exercicio em vez de em baixo. */
-function ordemDaNovaSerie(doDia) {
+   numeracao, e a serie nova caia no meio do exercicio em vez de em baixo.
+   O mesmo para um exercicio novo, e para um treino copiado para cima de outro:
+   tirar um exercicio inteiro deixa um buraco em ordemExercicio. */
+function _depoisDoMaior(doDia, campo) {
   return doDia.reduce(function (m, s) {
-    return Number.isFinite(s.ordem) && s.ordem >= m ? s.ordem + 1 : m;
+    return Number.isFinite(s[campo]) && s[campo] >= m ? s[campo] + 1 : m;
   }, 0);
 }
+function ordemDaNovaSerie(doDia) { return _depoisDoMaior(doDia, 'ordem'); }
+function ordemDoNovoExercicio(doDia) { return _depoisDoMaior(doDia, 'ordemExercicio'); }
 
 /* --------------------------------------------------------------------------
    Recordes pessoais
@@ -4912,7 +4916,7 @@ function acrescentarSerie(exercicioId) {
     exercicioId: exercicioId,
     data: Estado.dataAtual,
     ordemExercicio: deste.length ? deste[0].ordemExercicio
-      : new Set(doDia.map(function (s) { return s.exercicioId; })).size,
+      : ordemDoNovoExercicio(doDia),
     ordem: ordemDaNovaSerie(doDia),
     peso: modelo && Number.isFinite(modelo.peso) ? modelo.peso : 0,
     reps: modelo && Number.isFinite(modelo.reps) ? modelo.reps : null,
@@ -5222,8 +5226,8 @@ function copiarTreino(deData) {
       var sessao = garantirSessao(Estado.dataAtual);
       // As series copiadas entram DEPOIS das que ja la estao, senao os numeros
       // de ordem chocavam e a lista do dia saia baralhada.
-      var desvioEx = new Set(jaLa.map(function (s) { return s.exercicioId; })).size;
-      var desvioOrdem = jaLa.length;
+      var desvioEx = ordemDoNovoExercicio(jaLa);
+      var desvioOrdem = ordemDaNovaSerie(jaLa);
       var proximo = proximoId(Estado.series);
 
       var novas = origem.map(function (s, i) {
