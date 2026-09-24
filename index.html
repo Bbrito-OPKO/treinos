@@ -1087,6 +1087,15 @@ function reordenarExercicios(series, exercicioId, direcao) {
   return alteradas;
 }
 
+/* A ordem de uma serie acrescentada a meio do treino: depois de todas as
+   que o dia ja tem. Contar as series nao chega: tirar uma deixa um buraco na
+   numeracao, e a serie nova caia no meio do exercicio em vez de em baixo. */
+function ordemDaNovaSerie(doDia) {
+  return doDia.reduce(function (m, s) {
+    return Number.isFinite(s.ordem) && s.ordem >= m ? s.ordem + 1 : m;
+  }, 0);
+}
+
 /* --------------------------------------------------------------------------
    Recordes pessoais
 
@@ -4904,7 +4913,7 @@ function acrescentarSerie(exercicioId) {
     data: Estado.dataAtual,
     ordemExercicio: deste.length ? deste[0].ordemExercicio
       : new Set(doDia.map(function (s) { return s.exercicioId; })).size,
-    ordem: doDia.length,
+    ordem: ordemDaNovaSerie(doDia),
     peso: modelo && Number.isFinite(modelo.peso) ? modelo.peso : 0,
     reps: modelo && Number.isFinite(modelo.reps) ? modelo.reps : null,
     rir: null,
