@@ -208,6 +208,32 @@ test('ciclo seguinte sem um acessorio pausado continua a passar as 17 regras', (
   assert.equal(JSON.stringify(p.calendario).includes('Leg Press'), false);
 });
 
+test('ciclo seguinte: comeca a seguir ao ultimo treino, mas nunca numa segunda que ja passou', () => {
+  // ciclo a acabar na sexta 25/09
+  assert.equal(N.inicioDoCicloSeguinte('2026-09-25', '2026-09-20'), '2026-09-28', 'ciclo ainda a correr');
+  assert.equal(N.inicioDoCicloSeguinte('2026-09-25', '2026-09-28'), '2026-09-28', 'hoje e a segunda certa');
+  // ficou uma semana em falta: a segunda 28/09 ja passou
+  assert.equal(N.inicioDoCicloSeguinte('2026-09-25', '2026-09-29'), '2026-10-05');
+  assert.equal(N.inicioDoCicloSeguinte('2026-09-25', '2026-10-05'), '2026-10-05');
+  assert.equal(N.inicioDoCicloSeguinte('2026-09-25', '2026-10-08'), '2026-10-12');
+});
+
+test('ciclo seguinte: maximos por fazer no ultimo ciclo nao herdam o resultado do anterior', () => {
+  const app = appCom();
+  const sup = seriesDo(app, '2026-09-07', 'Flat Barbell Bench Press');
+  sup.forEach(s => { s.feita = true; });
+  sup[2].peso = 115;                                        // ciclo 1: supino falhou
+  const c2 = N.progredirConfig(app.ciclos[0].cfg, '2026-09-28', '2026-09-26',
+    N.resultadosMaximos(N.mapaDoPlano(app.ciclos, app.sessoes), app.series, app.exercicios, '2026-09-26'));
+  const ciclos = app.ciclos.concat([{ dataInicio: '2026-09-28', cfg: c2, gravado: '2026-09-26' }]);
+  // a 30/09, os maximos do supino no ciclo 2 (05/10) ainda nao chegaram
+  const mapa = N.mapaDoPlano(ciclos, app.sessoes);
+  assert.equal(N.resultadosMaximos(mapa, app.series, app.exercicios, '2026-09-30').SUPINO.estado, 'falhou', 'o erro de antes');
+  const r = N.resultadosMaximos(mapa.slice(-1), app.series, app.exercicios, '2026-09-30');
+  assert.equal(r.SUPINO, undefined);
+  assert.equal(N.progredirConfig(c2, '2026-10-26', '2026-09-30', r).lift.SUPINO.max, c2.lift.SUPINO.max + c2.lift.SUPINO.inc);
+});
+
 /* --- estagnacao e descarga --- */
 
 test('estagnacao: 3 sessoes sem passar a anterior sugere; uma melhoria tira a sugestao', () => {

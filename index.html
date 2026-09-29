@@ -2203,6 +2203,16 @@ function progredirConfig(cfg, novaDataInicio, hoje, resultados, pausados) {
   return novo;
 }
 
+/* A segunda em que comeca o ciclo seguinte: a seguir ao ultimo treino do
+   ultimo ciclo (conta os empurroes), mas nunca no passado. Se o ciclo ja
+   acabou e ficou uma semana em falta, comeca na proxima segunda (hoje, se
+   hoje for segunda) — senao o ciclo novo nascia com dias ja falhados. */
+function inicioDoCicloSeguinte(ultimaData, hoje) {
+  var aSeguir = _somarDias(segundaDaSemana(ultimaData), 7);
+  var proxima = segundaDaSemana(_somarDias(hoje, 6));
+  return aSeguir > proxima ? aSeguir : proxima;
+}
+
 /* ---------------------------------------------------------------------------
    Validador do plano: as 17 provas do validar.py
 
@@ -7573,6 +7583,15 @@ function editarPlanoAlimentar(tipo) {
 
   abrirFolha('Plano de ' + tipo, html, function (c) {
     Array.prototype.forEach.call(c.querySelectorAll('[data-pag]'), function (inp) {
+      // Grava a cada tecla, sem refazer a folha: no iPhone, tocar em Fechar (ou
+      // noutro botao) nao tira o foco do campo, o change nao chega e perdia-se.
+      inp.oninput = function () {
+        var g = +inp.value;
+        if (!(g > 0)) return;
+        itens[+inp.dataset.pag].gramas = g;
+        var v = {}; v[tipo] = _copia(itens);
+        guardarVersaoPlano(v).then(render);
+      };
       inp.onchange = function () {
         var g = +inp.value;
         if (!(g > 0)) { avisar('Gramas em falta'); return; }
@@ -8377,9 +8396,10 @@ function prepararCicloSeguinte() {
   var mapa = mapaDoPlano(ciclos, Estado.sessoes);
   // a segunda a seguir ao ultimo treino do ultimo ciclo (conta os empurroes)
   var ultimaData = mapa[mapa.length - 1].dias.map(function (d) { return d.data; }).sort().pop();
-  var resultados = resultadosMaximos(mapa, Estado.series, Estado.exercicios, hojeIso());
+  // so os maximos do ultimo ciclo: os do anterior ja deram este
+  var resultados = resultadosMaximos(mapa.slice(-1), Estado.series, Estado.exercicios, hojeIso());
   var pausados = Estado.definicoes.planoPausados || [];
-  var cfg = progredirConfig(ultimo.cfg, _somarDias(segundaDaSemana(ultimaData), 7), hojeIso(),
+  var cfg = progredirConfig(ultimo.cfg, inicioDoCicloSeguinte(ultimaData, hojeIso()), hojeIso(),
     resultados, pausados);
   var aberto = null;   // 'semana|dia' expandido na lista
   var PORQUE = {
