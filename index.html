@@ -2213,6 +2213,25 @@ function inicioDoCicloSeguinte(ultimaData, hoje) {
   return aSeguir > proxima ? aSeguir : proxima;
 }
 
+/* O mesmo ciclo, com a ordem dos lifts rodada para `primeiro` fazer os
+   maximos na primeira segunda. A rotacao entre semanas nao muda (as 17
+   provas passam nas 4 ordens), so a semana por onde se entra. */
+function rodarLifts(cfg, primeiro) {
+  var novo = _copia(cfg), i = cfg.lifts.indexOf(primeiro);
+  if (i > 0) novo.lifts = cfg.lifts.slice(i).concat(cfg.lifts.slice(0, i));
+  return novo;
+}
+
+/* O que sai ao apagar um ciclo gravado: as sessoes com a identidade dele e
+   as series delas. So se apaga se nenhuma serie estiver feita. */
+function partesDoCiclo(dataInicio, sessoes, series) {
+  var ids = {};
+  var ss = sessoes.filter(function (s) { return s.plano && s.plano.ciclo === dataInicio; });
+  ss.forEach(function (s) { ids[s.id] = 1; });
+  var se = series.filter(function (s) { return ids[s.sessaoId]; });
+  return { sessoes: ss, series: se, feitas: se.filter(serieFeita).length };
+}
+
 /* ---------------------------------------------------------------------------
    Validador do plano: as 17 provas do validar.py
 
@@ -8366,9 +8385,20 @@ function renderPlano() {
     html += '<p class="mini fraco">O ciclo ' + (ca.numero + 1) + ' já está gravado e começa a ' +
       esc(dataLonga(primeiroProx)) + '.</p>';
   }
+  // O ultimo ciclo gravado pode sair enquanto nao tiver nenhuma serie feita
+  // (o ciclo 1 nunca: e a base de todos).
+  var ciclosGravados = ciclosDoPlano();
+  var ultimoRec = ciclosGravados[ciclosGravados.length - 1];
+  var partesUltimo = ciclosGravados.length > 1 &&
+    partesDoCiclo(ultimoRec.dataInicio, Estado.sessoes, Estado.series);
+  if (partesUltimo && !partesUltimo.feitas) {
+    html += '<button class="btn larga fina" id="plApagarCiclo" style="color:var(--vermelho)">Apagar o ciclo ' +
+      ciclosGravados.length + ' (começa a ' + esc(dataCurta(ultimoRec.dataInicio)) + ')</button>';
+  }
 
   $('#v-plano').innerHTML = html;
   $('#plSeguinte').onclick = prepararCicloSeguinte;
+  if ($('#plApagarCiclo')) $('#plApagarCiclo').onclick = apagarUltimoCiclo;
   if ($('#plIA')) $('#plIA').onclick = function () {
     pedirRevisaoIA('treino', this).then(function (ok) { if (ok) render(); });
   };
@@ -8415,6 +8445,13 @@ function prepararCicloSeguinte() {
 
     var html = '<label class="campo"><span>Começa na segunda</span>' +
       '<input id="csData" type="date" value="' + cfg.dataInicio + '"></label>' +
+      '<label class="campo"><span>Máximos na primeira segunda</span><select id="csPrimeiro">' +
+      cfg.lifts.slice().sort(function (a, b) {
+        return ultimo.cfg.lifts.indexOf(a) - ultimo.cfg.lifts.indexOf(b);
+      }).map(function (L) {
+        return '<option value="' + L + '"' + (L === cfg.lifts[0] ? ' selected' : '') + '>' +
+          esc(cfg.nomeLift[L]) + '</option>';
+      }).join('') + '</select></label>' +
       '<div class="cartao" style="margin-top:0"><h3>Máximos deste ciclo</h3>' +
       cfg.lifts.map(function (L) {
         var r = resultados[L];
@@ -8475,6 +8512,13 @@ function prepararCicloSeguinte() {
       cfg.dataInicio = segundaDaSemana(v);
       desenhar(corpo);
     };
+    corpo.querySelector('#csPrimeiro').onchange = function (e) {
+      // os ajustes sao por semana|dia: com outra ordem ja nao dizem o mesmo
+      cfg = rodarLifts(cfg, e.target.value);
+      cfg.ajustes = {};
+      aberto = null;
+      desenhar(corpo);
+    };
     Array.prototype.forEach.call(corpo.querySelectorAll('[data-csdia]'), function (b) {
       b.onclick = function () { aberto = aberto === b.dataset.csdia ? null : b.dataset.csdia; desenhar(corpo); };
     });
@@ -8499,6 +8543,34 @@ function prepararCicloSeguinte() {
   abrirFolha('Ciclo ' + (ciclos.length + 1), '<div id="csCorpo"></div>', function (c) {
     desenhar(c.querySelector('#csCorpo'));
   });
+}
+
+function apagarUltimoCiclo() {
+  var ciclos = ciclosDoPlano();
+  var rec = ciclos[ciclos.length - 1];
+  var p = partesDoCiclo(rec.dataInicio, Estado.sessoes, Estado.series);
+  if (ciclos.length < 2 || p.feitas) { avisar('Este ciclo já tem séries feitas: não se apaga'); return; }
+  confirmar('Apagar o ciclo ' + ciclos.length,
+    'Sai o ciclo que começa a ' + dataLonga(rec.dataInicio) + ': ' +
+    plural(p.sessoes.length, 'treino', 'treinos') + ' e ' + plural(p.series.length, 'série', 'séries') +
+    ' por fazer. Depois podes gravar outro em Ciclo seguinte.',
+    'Apagar o ciclo', function () {
+      var idsSessoes = {}, idsSeries = {};
+      p.sessoes.forEach(function (s) { idsSessoes[s.id] = 1; });
+      p.series.forEach(function (s) { idsSeries[s.id] = 1; });
+      Promise.all([
+        BD.apagarMuitos('series', p.series.map(function (s) { return s.id; })),
+        BD.apagarMuitos('sessoes', p.sessoes.map(function (s) { return s.id; }))
+      ]).then(function () { return guardarDefinicao('planoCiclos', ciclos.slice(0, -1)); })
+        .then(function () {
+          Estado.series = Estado.series.filter(function (s) { return !idsSeries[s.id]; });
+          Estado.sessoes = Estado.sessoes.filter(function (s) { return !idsSessoes[s.id]; });
+          reindexar();
+          avisar('Ciclo apagado');
+          render();
+        })
+        .catch(function (e) { avisar('Não apagou: ' + e.message); });
+    });
 }
 
 function gravarCiclo(cfg, plano) {

@@ -31,7 +31,7 @@ const NOMES = [
   'progressoDeObjetivo', 'estimarPesoParaReps', 'estimativasPorReps',
   'LOJAS_BACKUP', 'juntarBackup',
   'PLANO_CONFIG_PADRAO', 'arredondarPy', 'escolherMax', 'escolherMin',
-  'gerarPlano', 'validarPlano', 'planoParaSessoes', 'progredirConfig', 'inicioDoCicloSeguinte',
+  'gerarPlano', 'validarPlano', 'planoParaSessoes', 'progredirConfig', 'inicioDoCicloSeguinte', 'rodarLifts', 'partesDoCiclo',
   'mapaDoPlano', 'sugerirEmpurrar', 'aplicarEmpurrar', 'cargaDoFeito', 'sugerirCargas',
   'aplicarCarga', 'resultadosMaximos', 'sugerirEstagnacao', 'sugerirDescarga',
   'aplicarDescarga', 'calcularSugestoes',
