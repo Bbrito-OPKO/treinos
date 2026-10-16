@@ -132,13 +132,24 @@ que a justifica e **Aceitar / Ignorar**. Nada muda sozinho. As regras:
 | Sugestão | Quando | Aceitar faz |
 |---|---|---|
 | Empurrar o plano | Faltaste à **segunda** ou à **quinta** e não treinaste nenhum dia do plano depois disso. Terça e sexta não empurram. | Todos os treinos por fazer, desse dia em diante, passam 7 dias. Se uma data de destino já tem outro treino, não mexe em nada. |
-| Carga de um acessório | O que fizeste (kg, reps e RIR quando há) aguenta uma carga um passo acima ou abaixo (2,5 kg abaixo de 60, 5 acima). Sem RIR: chegar às reps conta como RIR 2, não chegar como RIR 0. Quem faz o plano tal e qual fica igual. | Muda a carga no catálogo e refaz as séries por fazer desse exercício. |
+| Carga de um acessório | O que fizeste (kg, reps e RIR quando há) aguenta uma carga um passo acima ou abaixo (2,5 kg abaixo de 60, 5 acima). Sem RIR: chegar às reps conta como RIR 2, não chegar como RIR 0. Quem faz o plano tal e qual fica igual. Um acessório a 0 kg feito com lastro (ex.: Chest Dips) passa a ter carga: a do lastro. | Muda a carga no catálogo e refaz as séries por fazer desse exercício. |
 | Tirar um acessório | 3 sessões do plano sem passar a anterior. | Sai no ciclo seguinte; o gerador escolhe outro. |
 | Semana mais leve | Numa semana com 3+ treinos, 30% das séries ficaram 2+ reps aquém ou 4+ foram a RIR 0. | A semana seguinte fica a -10%. |
 
 **Máximos.** No ciclo seguinte, cada lift sobe a partir do melhor single feito
 no dia de máximos. Se falhou o single, ou não fez esse dia, não sobe. A folha do
 ciclo seguinte diz a razão de cada um.
+
+**Máximo pelo que fizeste** (desde 16/10/2026). O dia de máximos não é o único
+que conta. Cada série do lift feita nos últimos 28 dias dá um 1RM estimado
+(Epley, kg × (1 + (reps + RIR) / 30); sem RIR conta 0; até 15 reps). O máximo
+do plano é o single com 2 reps de reserva: 1RM ÷ 1,1, a 2,5 kg (a mesma escala
+com que o plano começou: morto 200 → 180). Quando isto passa o máximo atual
+pelo menos o incremento do lift, aparece **Máximo do … : 180 → 190 kg**, com a
+série que o justifica. Só sobe, nunca desce. Aceitar muda o máximo nos ciclos
+que ainda têm dias por vir (os acabados ficam), e todas as séries do lift
+sobem na mesma proporção, a 2,5 kg; das séries gravadas, mudam só as por fazer,
+de hoje em diante.
 
 As decisões ficam na loja `sugestoes` (pela chave); uma sugestão ignorada não volta.
 As sessões do plano guardam a identidade em `plano: { ciclo, semana, dia }` — é o

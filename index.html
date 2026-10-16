@@ -2519,7 +2519,8 @@ function planoParaSessoes(plano, exercicios, sessoesExistentes, proxIds) {
    - A carga dos acessorios sai do que ele fez: kg, reps e RIR (quando ha).
      Quem faz exatamente o plano fica com a mesma carga.
    - Os maximos: se o single saiu, o ciclo seguinte sobe a partir do melhor
-     single; se falhou (ou nao se fez), nao sobe.
+     single; se falhou (ou nao se fez), nao sobe. Desde 16/10/2026 tambem
+     se sugere subir ja, pelo 1RM das series das ultimas 4 semanas.
    - Tres sessoes do plano sem progresso num acessorio: sugere tira-lo do
      ciclo seguinte.
    - Uma semana com muitas series aquem das reps: sugere a seguinte a -10%.
@@ -2679,16 +2680,20 @@ function sugerirCargas(mapa, series, exercicios, hoje) {
   Object.keys(ultimo).forEach(function (nome) {
     var u = ultimo[nome];
     var acc = cfgAtual.acc.filter(function (a) { return a[0] === nome; })[0];
-    if (!acc || !acc[2]) return;
+    if (!acc) return;
     var feito = cargaDoFeito(u.alvo, u.feitas, u.dia.dia);
+    // Sem carga no plano (so o peso do corpo): se fez com lastro, o lastro
+    // passa a ser a carga (16/10/2026, Chest Dips a 0 kg feitos com 20-30).
+    var novo;
+    if (!acc[2]) novo = feito;
     // O que a mesma conta da com o plano feito tal e qual. O arredondamento
     // das series do plano (a 2,5 ou 5) desvia a conta um passo para cima ou
     // para baixo; comparar com isto, e nao com o catalogo, e o que faz quem
     // cumpriu o plano ficar com a mesma carga.
     var neutro = cargaDoFeito(u.alvo, u.alvo.map(function (s) { return { peso: s[0], reps: s[1], rir: null }; }), u.dia.dia);
-    if (feito === null || neutro === null) return;
+    if (feito === null || (acc[2] && neutro === null)) return;
     var antes = acc[2];
-    var novo = Math.max(2.5, antes + (feito - neutro));
+    if (antes) novo = Math.max(2.5, antes + (feito - neutro));
     if (Math.abs(novo - antes) < _passoKg(Math.min(novo, antes))) return;
     sug.push({
       tipo: 'carga',
@@ -2762,6 +2767,84 @@ function resultadosMaximos(mapa, series, exercicios, hoje) {
     };
   });
   return res;
+}
+
+/* O maximo pelo que foi feito nas ultimas 4 semanas (16/10/2026, a pedido do
+   Bruno). O dia de maximos so mede o single; o resto do ciclo tambem diz
+   quanto aguenta. Cada serie feita do lift da um 1RM (Epley, com as reps em
+   reserva: RIR quando ha, 0 quando nao ha). O maximo do plano e o single com
+   2 reps de reserva, 1RM / (1 + 3/30): e a mesma escala com que o plano
+   comecou (morto 200 -> 180). So sobe, e so quando sobe pelo menos o
+   incremento do lift. */
+var MAXIMO_JANELA_DIAS = 28;
+
+function sugerirMaximos(mapa, series, exercicios, hoje) {
+  var cfg = mapa[mapa.length - 1].rec.cfg;
+  var desde = _somarDias(hoje, -MAXIMO_JANELA_DIAS);
+  var idPorNome = {};
+  exercicios.forEach(function (e) { idPorNome[e.nome] = e.id; });
+  var sug = [];
+  cfg.lifts.forEach(function (L) {
+    var nome = cfg.nomeLift[L];
+    var id = idPorNome[PLANO_NOME_NA_APP[nome] || nome];
+    var melhor = null;
+    series.forEach(function (s) {
+      if (s.exercicioId !== id || !serieFeita(s) || !(s.peso > 0) || !(s.reps >= 1)) return;
+      if (s.reps > LIMITE_FIAVEL || !(s.data >= desde && s.data < hoje)) return;
+      var e1 = s.peso * (1 + (s.reps + (Number.isFinite(s.rir) ? s.rir : 0)) / 30);
+      if (!melhor || e1 > melhor.e1) melhor = { e1: e1, serie: s };
+    });
+    if (!melhor) return;
+    var antes = cfg.lift[L].max;
+    var novo = arredondarPy(melhor.e1 / 1.1 / 2.5) * 2.5;
+    if (novo - antes < cfg.lift[L].inc) return;
+    var s = melhor.serie;
+    sug.push({
+      tipo: 'maximo',
+      chave: 'maximo|' + L + '|' + novo,
+      titulo: 'Máximo do ' + nome.toLowerCase() + ': ' + num_(antes) + ' → ' + num_(novo) + ' kg',
+      detalhe: 'A ' + s.data.slice(8) + '/' + s.data.slice(5, 7) + ' fizeste ' + num_(s.peso) + '×' + s.reps +
+        (Number.isFinite(s.rir) ? ' RIR ' + s.rir : '') + ' (1RM estimado ' + num_(melhor.e1) +
+        ' kg). O máximo do plano é o single com 2 reps de reserva. As séries por fazer do lift sobem na mesma proporção.',
+      lift: L, antes: antes, novo: novo
+    });
+  });
+  return sug;
+}
+
+/* Muda o maximo de um lift nos ciclos que ainda tem dias por vir (os que ja
+   acabaram ficam como foram planeados) e refaz as series por fazer desse
+   lift, de hoje em diante. Todas as series do lift sobem na mesma proporcao,
+   arredondadas a 2,5 kg, como no ciclo seguinte. */
+function aplicarMaximo(mapa, series, exercicios, L, novoMax, hoje) {
+  var porSessao = _seriesPorSessao(series);
+  var alteradas = [];
+  var ciclos = mapa.map(function (c) {
+    var rec = _copia(c.rec);
+    if (!c.dias.some(function (d) { return d.data >= hoje; })) return rec;
+    var l = rec.cfg.lift[L], antes = l.max;
+    ['maximos', 'volume_5', 'volume_8', 'leve'].forEach(function (m) {
+      l[m] = l[m].map(function (s) { return [arredondarPy(s[0] * novoMax / antes / 2.5) * 2.5, s[1]]; });
+    });
+    l.max = novoMax;
+    var nome = rec.cfg.nomeLift[L];
+    var id = (exercicios.filter(function (e) { return e.nome === (PLANO_NOME_NA_APP[nome] || nome); })[0] || {}).id;
+    c.dias.forEach(function (d) {
+      if (!d.sessao || d.data < hoje || d.lift !== L) return;
+      var alvo = l[d.modo];
+      (porSessao[d.sessao.id] || []).filter(function (s) { return s.exercicioId === id; })
+        .sort(function (a, b) { return a.ordem - b.ordem; })
+        .forEach(function (s, k) {
+          if (serieFeita(s) || !alvo[k]) return;
+          var n = _copia(s);
+          n.peso = alvo[k][0];
+          n.reps = alvo[k][1];
+          alteradas.push(n);
+        });
+    });
+    return rec;
+  });
+  return { ciclos: ciclos, series: alteradas };
 }
 
 /* --- Estagnacao ---------------------------------------------------------- */
@@ -2879,7 +2962,8 @@ function calcularSugestoes(ciclos, sessoes, series, exercicios, hoje, decididas)
   if (e) todas.push(e);
   var d = sugerirDescarga(mapa, series, exercicios, hoje);
   if (d) todas.push(d);
-  todas = todas.concat(sugerirCargas(mapa, series, exercicios, hoje))
+  todas = todas.concat(sugerirMaximos(mapa, series, exercicios, hoje))
+    .concat(sugerirCargas(mapa, series, exercicios, hoje))
     .concat(sugerirEstagnacao(mapa, series, exercicios, hoje));
   return todas.filter(function (s) { return !decididas[s.chave]; });
 }
@@ -8294,6 +8378,10 @@ function aceitarSugestao(sug) {
     var c = aplicarCarga(mapa, Estado.series, Estado.exercicios, sug.nome, sug.novo, hoje);
     passo = gravarAlterados('series', c.series).then(function () { return guardarDefinicao('planoCiclos', c.ciclos); })
       .then(function () { return sug.nome + ' a ' + num(sug.novo) + ' kg (' + c.series.length + ' séries por fazer mudadas)'; });
+  } else if (sug.tipo === 'maximo') {
+    var mx = aplicarMaximo(mapa, Estado.series, Estado.exercicios, sug.lift, sug.novo, hoje);
+    passo = gravarAlterados('series', mx.series).then(function () { return guardarDefinicao('planoCiclos', mx.ciclos); })
+      .then(function () { return 'Máximo a ' + num(sug.novo) + ' kg (' + mx.series.length + ' séries por fazer mudadas)'; });
   } else if (sug.tipo === 'descarga') {
     var alt = aplicarDescarga(mapa, Estado.series, sug.depoisDe);
     passo = gravarAlterados('series', alt).then(function () { return alt.length + ' séries da semana seguinte a -10%'; });
