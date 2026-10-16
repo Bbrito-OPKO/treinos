@@ -33,7 +33,7 @@ const NOMES = [
   'PLANO_CONFIG_PADRAO', 'arredondarPy', 'escolherMax', 'escolherMin',
   'gerarPlano', 'validarPlano', 'planoParaSessoes', 'progredirConfig', 'inicioDoCicloSeguinte', 'rodarLifts', 'partesDoCiclo',
   'mapaDoPlano', 'sugerirEmpurrar', 'aplicarEmpurrar', 'cargaDoFeito', 'sugerirCargas',
-  'aplicarCarga', 'resultadosMaximos', 'sugerirEstagnacao', 'sugerirDescarga',
+  'aplicarCarga', 'resultadosMaximos', 'sugerirMaximos', 'aplicarMaximo', 'sugerirEstagnacao', 'sugerirDescarga',
   'aplicarDescarga', 'calcularSugestoes',
   'REFEICOES', 'normalizarTexto', 'alimentosDoInsa', 'pesquisarAlimentos', 'macrosDe',
   'totaisDoDia', 'alimentoDoOff', 'registoDeComida', 'copiarComidas', 'habitosDeComida',

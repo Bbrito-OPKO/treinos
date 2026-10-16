@@ -140,6 +140,17 @@ que a justifica e **Aceitar / Ignorar**. Nada muda sozinho. As regras:
 no dia de máximos. Se falhou o single, ou não fez esse dia, não sobe. A folha do
 ciclo seguinte diz a razão de cada um.
 
+**Máximo pelo que fizeste** (desde 16/10/2026). O dia de máximos não é o único
+que conta. Cada série do lift feita nos últimos 28 dias dá um 1RM estimado
+(Epley, kg × (1 + (reps + RIR) / 30); sem RIR conta 0; até 15 reps). O máximo
+do plano é o single com 2 reps de reserva: 1RM ÷ 1,1, a 2,5 kg (a mesma escala
+com que o plano começou: morto 200 → 180). Quando isto passa o máximo atual
+pelo menos o incremento do lift, aparece **Máximo do … : 180 → 190 kg**, com a
+série que o justifica. Só sobe, nunca desce. Aceitar muda o máximo nos ciclos
+que ainda têm dias por vir (os acabados ficam), e todas as séries do lift
+sobem na mesma proporção, a 2,5 kg; das séries gravadas, mudam só as por fazer,
+de hoje em diante.
+
 As decisões ficam na loja `sugestoes` (pela chave); uma sugestão ignorada não volta.
 As sessões do plano guardam a identidade em `plano: { ciclo, semana, dia }` — é o
 que as deixa mudar de data sem se perderem. As do ciclo 1 reconhecem-se pela nota
