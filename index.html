@@ -2680,16 +2680,20 @@ function sugerirCargas(mapa, series, exercicios, hoje) {
   Object.keys(ultimo).forEach(function (nome) {
     var u = ultimo[nome];
     var acc = cfgAtual.acc.filter(function (a) { return a[0] === nome; })[0];
-    if (!acc || !acc[2]) return;
+    if (!acc) return;
     var feito = cargaDoFeito(u.alvo, u.feitas, u.dia.dia);
+    // Sem carga no plano (so o peso do corpo): se fez com lastro, o lastro
+    // passa a ser a carga (16/10/2026, Chest Dips a 0 kg feitos com 20-30).
+    var novo;
+    if (!acc[2]) novo = feito;
     // O que a mesma conta da com o plano feito tal e qual. O arredondamento
     // das series do plano (a 2,5 ou 5) desvia a conta um passo para cima ou
     // para baixo; comparar com isto, e nao com o catalogo, e o que faz quem
     // cumpriu o plano ficar com a mesma carga.
     var neutro = cargaDoFeito(u.alvo, u.alvo.map(function (s) { return { peso: s[0], reps: s[1], rir: null }; }), u.dia.dia);
-    if (feito === null || neutro === null) return;
+    if (feito === null || (acc[2] && neutro === null)) return;
     var antes = acc[2];
-    var novo = Math.max(2.5, antes + (feito - neutro));
+    if (antes) novo = Math.max(2.5, antes + (feito - neutro));
     if (Math.abs(novo - antes) < _passoKg(Math.min(novo, antes))) return;
     sug.push({
       tipo: 'carga',

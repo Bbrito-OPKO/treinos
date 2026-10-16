@@ -132,7 +132,7 @@ que a justifica e **Aceitar / Ignorar**. Nada muda sozinho. As regras:
 | Sugestão | Quando | Aceitar faz |
 |---|---|---|
 | Empurrar o plano | Faltaste à **segunda** ou à **quinta** e não treinaste nenhum dia do plano depois disso. Terça e sexta não empurram. | Todos os treinos por fazer, desse dia em diante, passam 7 dias. Se uma data de destino já tem outro treino, não mexe em nada. |
-| Carga de um acessório | O que fizeste (kg, reps e RIR quando há) aguenta uma carga um passo acima ou abaixo (2,5 kg abaixo de 60, 5 acima). Sem RIR: chegar às reps conta como RIR 2, não chegar como RIR 0. Quem faz o plano tal e qual fica igual. | Muda a carga no catálogo e refaz as séries por fazer desse exercício. |
+| Carga de um acessório | O que fizeste (kg, reps e RIR quando há) aguenta uma carga um passo acima ou abaixo (2,5 kg abaixo de 60, 5 acima). Sem RIR: chegar às reps conta como RIR 2, não chegar como RIR 0. Quem faz o plano tal e qual fica igual. Um acessório a 0 kg feito com lastro (ex.: Chest Dips) passa a ter carga: a do lastro. | Muda a carga no catálogo e refaz as séries por fazer desse exercício. |
 | Tirar um acessório | 3 sessões do plano sem passar a anterior. | Sai no ciclo seguinte; o gerador escolhe outro. |
 | Semana mais leve | Numa semana com 3+ treinos, 30% das séries ficaram 2+ reps aquém ou 4+ foram a RIR 0. | A semana seguinte fica a -10%. |
 
