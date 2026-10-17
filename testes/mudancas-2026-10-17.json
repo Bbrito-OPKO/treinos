@@ -1,0 +1,269 @@
+{
+ "formato": "treinos-mudancas-plano",
+ "criado": "2026-10-17",
+ "ciclos": [
+  {
+   "dataInicio": "2026-09-28",
+   "dias": {
+    "4|segunda": {
+     "lift": "SUPINO",
+     "trocar": [
+      {
+       "de": "Smith Squat",
+       "para": "Lungees"
+      },
+      {
+       "de": "Leg Press",
+       "para": "Leg Curl Machine"
+      },
+      {
+       "de": "Lateral Machine Raise",
+       "para": "Seated Dumbbell Press",
+       "grupo": "ombro",
+       "series": [
+        [
+         52.5,
+         8
+        ],
+        [
+         57.5,
+         6
+        ]
+       ]
+      }
+     ]
+    },
+    "4|terca": {
+     "lift": "AGACHAMENTO",
+     "trocar": [
+      {
+       "de": "Flat Dumbbell Bench Press",
+       "para": "Chest Dips"
+      },
+      {
+       "de": "Dumbbell Row",
+       "para": "Rear Delt Machine Fly"
+      },
+      {
+       "de": "Rear Delt Machine Fly",
+       "para": "Dumbbell Row"
+      }
+     ]
+    },
+    "4|quinta": {
+     "lift": "OMBRO",
+     "trocar": [
+      {
+       "de": "Barbell Row",
+       "para": "Lat Pulldown"
+      }
+     ]
+    },
+    "4|sexta": {
+     "lift": "MORTO",
+     "trocar": [
+      {
+       "de": "Smith Squat",
+       "para": "Barbell Front Squat"
+      },
+      {
+       "de": "Flat Dumbbell Fly",
+       "para": "Incline Dumbbell Bench Press"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "seguinte": true,
+   "lifts": [
+    "AGACHAMENTO",
+    "OMBRO",
+    "MORTO",
+    "SUPINO"
+   ],
+   "dias": {
+    "1|segunda": {
+     "lift": "AGACHAMENTO",
+     "novos": [
+      {
+       "nome": "Lateral Machine Raise",
+       "depois": "Barbell Row"
+      }
+     ]
+    },
+    "1|terca": {
+     "lift": "OMBRO",
+     "trocar": [
+      {
+       "de": "Romanian Deadlift",
+       "para": "Bulgarian"
+      },
+      {
+       "de": "Bulgarian",
+       "para": "Leg Extension Machine"
+      },
+      {
+       "de": "Pendlay Row",
+       "para": "Lat Pulldown"
+      },
+      {
+       "de": "Incline Barbell Bench Press",
+       "para": "Flat Machine Fly"
+      }
+     ]
+    },
+    "1|quinta": {
+     "lift": "MORTO",
+     "trocar": [
+      {
+       "de": "Leg Press",
+       "para": "Barbell Front Squat"
+      },
+      {
+       "de": "Chin Up",
+       "para": "Seated Cable Row"
+      }
+     ]
+    },
+    "1|sexta": {
+     "lift": "SUPINO",
+     "tirar": [
+      "Rear Delt Machine Fly"
+     ],
+     "trocar": [
+      {
+       "de": "Lateral Machine Raise",
+       "para": "Seated Dumbbell Press",
+       "grupo": "ombro",
+       "series": [
+        [
+         45,
+         12
+        ],
+        [
+         50,
+         10
+        ]
+       ]
+      },
+      {
+       "de": "Lat Pulldown",
+       "para": "Chin Up Machine"
+      }
+     ]
+    },
+    "2|segunda": {
+     "lift": "OMBRO",
+     "trocar": [
+      {
+       "de": "Flat Dumbbell Bench Press",
+       "para": "Chest Dips"
+      }
+     ]
+    },
+    "2|quinta": {
+     "lift": "SUPINO",
+     "trocar": [
+      {
+       "de": "Lateral Dumbbell Raise",
+       "para": "Seated Dumbbell Press",
+       "grupo": "ombro",
+       "series": [
+        [
+         52.5,
+         8
+        ],
+        [
+         57.5,
+         6
+        ]
+       ]
+      }
+     ]
+    },
+    "2|sexta": {
+     "lift": "AGACHAMENTO",
+     "trocar": [
+      {
+       "de": "Flat Dumbbell Fly",
+       "para": "Incline Barbell Bench Press"
+      }
+     ]
+    },
+    "3|segunda": {
+     "lift": "MORTO",
+     "trocar": [
+      {
+       "de": "Incline Barbell Bench Press",
+       "para": "Chest Dips"
+      }
+     ]
+    },
+    "3|terca": {
+     "lift": "SUPINO",
+     "tirar": [
+      "Lateral Dumbbell Raise"
+     ],
+     "trocar": [
+      {
+       "de": "Seated Leg Curl Machine",
+       "para": "Leg Extension Machine"
+      },
+      {
+       "de": "Rear Delt Dumbbell Raise",
+       "para": "Seated Dumbbell Press",
+       "grupo": "ombro",
+       "series": [
+        [
+         52.5,
+         8
+        ],
+        [
+         57.5,
+         6
+        ]
+       ]
+      },
+      {
+       "de": "Barbell Row",
+       "para": "Lat Pulldown"
+      }
+     ]
+    },
+    "3|quinta": {
+     "lift": "AGACHAMENTO",
+     "trocar": [
+      {
+       "de": "Chest Dips",
+       "para": "Incline Barbell Bench Press"
+      },
+      {
+       "de": "Pendlay Row",
+       "para": "Barbell Row"
+      }
+     ],
+     "novos": [
+      {
+       "nome": "Lateral Dumbbell Raise",
+       "depois": "Barbell Row"
+      }
+     ]
+    },
+    "3|sexta": {
+     "lift": "OMBRO",
+     "tirar": [
+      "Leg Curl Machine",
+      "Seated Cable Row"
+     ],
+     "trocar": [
+      {
+       "de": "Incline Dumbbell Bench Press",
+       "para": "Flat Machine Fly"
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

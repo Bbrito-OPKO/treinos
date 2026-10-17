@@ -34,7 +34,7 @@ const NOMES = [
   'gerarPlano', 'validarPlano', 'planoParaSessoes', 'progredirConfig', 'inicioDoCicloSeguinte', 'rodarLifts', 'partesDoCiclo',
   'mapaDoPlano', 'sugerirEmpurrar', 'aplicarEmpurrar', 'cargaDoFeito', 'sugerirCargas',
   'aplicarCarga', 'resultadosMaximos', 'sugerirMaximos', 'aplicarMaximo', 'sugerirEstagnacao', 'sugerirDescarga',
-  'aplicarDescarga', 'calcularSugestoes',
+  'aplicarDescarga', 'calcularSugestoes', 'aplicarManual', 'seriesDoManual',
   'REFEICOES', 'normalizarTexto', 'alimentosDoInsa', 'pesquisarAlimentos', 'macrosDe',
   'totaisDoDia', 'alimentoDoOff', 'registoDeComida', 'copiarComidas', 'habitosDeComida',
   'KCAL_POR_KG', 'ATIVIDADES', 'OBJETIVOS', 'gastoPorFormula', 'macrosParaKcal', 'metaDeMacros',
