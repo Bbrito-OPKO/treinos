@@ -2487,22 +2487,30 @@ function planoParaSessoes(plano, exercicios, sessoesExistentes, proxIds) {
       if (datas[d.data]) { choques.push(d.data); return; }
       sessoes.push({ id: idSessao, data: d.data, inicio: null, fim: null,
         notas: 'Semana ' + sem.semana + ' - ' + d.modo });
-      var ordem = 0;
-      d.exercicios.forEach(function (ex, i) {
-        var e = bib[PLANO_NOME_NA_APP[ex.nome] || ex.nome];
-        var porTempo = e.tipo === 'peso_tempo';
-        ex.series.forEach(function (s) {
-          series.push({ id: idSerie++, sessaoId: idSessao, exercicioId: e.id, data: d.data,
-            ordemExercicio: i, ordem: ordem++, peso: s[0],
-            reps: porTempo ? 0 : s[1], rir: null, tempoSeg: porTempo ? s[1] : null,
-            distancia: null, supersetId: null, recordeOriginal: false, nota: null,
-            feita: false });
-        });
-      });
+      var doDia = _seriesDoDia(d.exercicios, bib, idSessao, d.data, idSerie);
+      series = series.concat(doDia);
+      idSerie += doDia.length;
       idSessao++;
     });
   });
   return { sessoes: sessoes, series: series, choques: choques, emFalta: [] };
+}
+
+/* As series de um dia do plano, por fazer, na sessao dada. */
+function _seriesDoDia(exercicios, bib, sessaoId, data, idInicial) {
+  var series = [], ordem = 0, id = idInicial;
+  exercicios.forEach(function (ex, i) {
+    var e = bib[PLANO_NOME_NA_APP[ex.nome] || ex.nome];
+    var porTempo = e.tipo === 'peso_tempo';
+    ex.series.forEach(function (s) {
+      series.push({ id: id++, sessaoId: sessaoId, exercicioId: e.id, data: data,
+        ordemExercicio: i, ordem: ordem++, peso: s[0],
+        reps: porTempo ? 0 : s[1], rir: null, tempoSeg: porTempo ? s[1] : null,
+        distancia: null, supersetId: null, recordeOriginal: false, nota: null,
+        feita: false });
+    });
+  });
+  return series;
 }
 
 /* ===========================================================================
@@ -2539,7 +2547,7 @@ function mapaDoPlano(ciclos, sessoes) {
     else (porData[s.data] = porData[s.data] || []).push(s);
   });
   return ciclos.map(function (rec, i) {
-    var plano = gerarPlano(rec.cfg);
+    var plano = _planoDoCiclo(rec);
     var dias = [];
     plano.calendario.forEach(function (sem) {
       PLANO_DIAS.forEach(function (d) {
@@ -2845,6 +2853,95 @@ function aplicarMaximo(mapa, series, exercicios, L, novoMax, hoje) {
     return rec;
   });
   return { ciclos: ciclos, series: alteradas };
+}
+
+/* --- Mudancas a mao (17/10/2026) -----------------------------------------
+   O Bruno muda exercicios do plano numa tabela fora da app. Ficam no ciclo
+   (rec.manual), por 'semana|dia', por cima do plano gerado: tirar, trocar e
+   acrescentar, sempre pelo NOME. A carga sai da regra dos acessorios; um
+   exercicio fora do catalogo traz as series consigo. As 17 regras continuam
+   a valer para o plano gerado; as mudancas a mao podem falhar-lhes, e o ecra
+   diz quais. */
+function aplicarManual(plano, manual, cfg) {
+  var P = _copia(plano), c = _prepararConfig(cfg), falhas = [];
+  Object.keys(manual || {}).forEach(function (chave) {
+    var m = manual[chave], p = chave.split('|');
+    var sem = P.calendario.filter(function (s) { return s.semana === +p[0]; })[0];
+    var d = sem && sem.dias[p[1]];
+    var onde = 'S' + p[0] + ' ' + p[1];
+    if (!d) { falhas.push(onde + ': esse dia não existe'); return; }
+    if (m.lift && m.lift !== d.lift) {
+      falhas.push(onde + ': as mudanças eram para ' + m.lift + ', o plano tem ' + d.lift);
+      return;
+    }
+    function linha(nome, series, grupo) {
+      var a = c.ACC[nome], g = a ? a[0] : grupo;
+      var s = a ? seriesAcessorio(c, nome, p[1]) : series;
+      if (!s || !cfg.categoria[g]) return null;
+      return { nome: nome, grupo: g, categoria: cfg.categoria[g], foco: false,
+        intensidade: a ? a[4] : 'leve', series: _copia(s) };
+    }
+    function indice(nome) {
+      for (var i = 0; i < d.exercicios.length; i++) {
+        if (!d.exercicios[i].foco && d.exercicios[i].nome === nome) return i;
+      }
+      return -1;
+    }
+    (m.tirar || []).forEach(function (nome) {
+      var i = indice(nome);
+      if (i < 0) falhas.push(onde + ': ' + nome + ' não está no dia');
+      else d.exercicios.splice(i, 1);
+    });
+    // as posicoes todas antes de trocar: assim A->B e B->A e uma troca de lugar
+    var trocas = (m.trocar || []).map(function (t) { return { t: t, i: indice(t.de) }; });
+    trocas.forEach(function (x) {
+      var l = linha(x.t.para, x.t.series, x.t.grupo);
+      if (x.i < 0) falhas.push(onde + ': ' + x.t.de + ' não está no dia');
+      else if (!l) falhas.push(onde + ': ' + x.t.para + ' sem carga');
+      else d.exercicios[x.i] = l;
+    });
+    (m.novos || []).forEach(function (n) {
+      var l = linha(n.nome, n.series, n.grupo);
+      if (!l) { falhas.push(onde + ': ' + n.nome + ' sem carga'); return; }
+      var i = n.depois ? indice(n.depois) : -1;
+      if (n.depois && i < 0) falhas.push(onde + ': ' + n.depois + ' não está no dia, ' + n.nome + ' vai para o fim');
+      d.exercicios.splice(i < 0 ? d.exercicios.length : i + 1, 0, l);
+    });
+  });
+  return { plano: P, falhas: falhas };
+}
+
+function _planoDoCiclo(rec) {
+  var p = gerarPlano(rec.cfg);
+  return rec.manual ? aplicarManual(p, rec.manual, rec.cfg).plano : p;
+}
+
+/* As series por fazer dos dias mudados a mao, de hoje em diante, refeitas a
+   partir do plano com as mudancas. Um dia com alguma serie feita fica. */
+function seriesDoManual(mapa, series, exercicios, indiceCiclo, hoje, proxIdSerie) {
+  var c = mapa[indiceCiclo], manual = c.rec.manual || {};
+  var bib = {}, porSessao = _seriesPorSessao(series);
+  exercicios.forEach(function (e) { bib[e.nome] = e; });
+  var dias = [], emFalta = [], comFeitas = [];
+  c.dias.forEach(function (d) {
+    if (!manual[d.semana + '|' + d.dia] || !d.sessao || d.data < hoje) return;
+    if ((porSessao[d.sessao.id] || []).some(serieFeita)) { comFeitas.push(d.data); return; }
+    d.exercicios.forEach(function (ex) {
+      var nome = PLANO_NOME_NA_APP[ex.nome] || ex.nome;
+      if (!bib[nome] && emFalta.indexOf(nome) === -1) emFalta.push(nome);
+    });
+    dias.push(d);
+  });
+  if (emFalta.length) return { apagar: [], novas: [], emFalta: emFalta, comFeitas: comFeitas, dias: [] };
+  var apagar = [], novas = [], id = proxIdSerie;
+  dias.forEach(function (d) {
+    (porSessao[d.sessao.id] || []).forEach(function (s) { apagar.push(s.id); });
+    var r = _seriesDoDia(d.exercicios, bib, d.sessao.id, d.sessao.data, id);
+    novas = novas.concat(r);
+    id += r.length;
+  });
+  return { apagar: apagar, novas: novas, emFalta: [], comFeitas: comFeitas,
+    dias: dias.map(function (d) { return d.data; }) };
 }
 
 /* --- Estagnacao ---------------------------------------------------------- */
@@ -3414,7 +3511,7 @@ var LOJAS_BACKUP = [
 
 /* Definicoes que sao dados do Bruno e vao no backup. As outras ficam no
    aparelho de proposito — e ai que mora a chave da IA. */
-var DEFINICOES_NO_BACKUP = ['planoCiclos', 'planoPausados', 'perfilDieta', 'planoAlimentar'];
+var DEFINICOES_NO_BACKUP = ['planoCiclos', 'planoPausados', 'perfilDieta', 'planoAlimentar', 'planoManualSeguinte'];
 
 var IDENTIDADE_BACKUP = {
   exercicios: function (r) { return String(r.nome || '').trim().toLowerCase(); },
@@ -7294,10 +7391,103 @@ function importarCsvFicheiro(texto, nome) {
     });
 }
 
+/* Mudancas a mao feitas fora da app (17/10/2026). As de um ciclo gravado
+   ficam nele (rec.manual) e refazem as series por fazer de hoje em diante;
+   as do ciclo seguinte ficam a espera dele (planoManualSeguinte). */
+var GRUPO_NA_APP = { perna: 'Pernas', peito: 'Peito', ombro: 'Ombros', costas: 'Costas',
+  biceps: 'Bíceps', triceps: 'Tríceps', gemeos: 'Pernas', abs: 'Abdominais' };
+
+function importarMudancasPlano(b, nome) {
+  var ciclos = ciclosDoPlano(), hoje = hojeIso();
+  var novosCiclos = _copia(ciclos), falhas = [], indices = [], linhas = [];
+  var seguinte = (b.ciclos || []).filter(function (x) { return x.seguinte; })[0] || null;
+  (b.ciclos || []).forEach(function (x) {
+    if (x.seguinte) return;
+    var i = -1;
+    ciclos.forEach(function (c, k) { if (c.dataInicio === x.dataInicio) i = k; });
+    if (i < 0) { falhas.push('Não há ciclo a começar a ' + dataCurta(x.dataInicio)); return; }
+    novosCiclos[i].manual = x.dias;
+    falhas = falhas.concat(aplicarManual(gerarPlano(novosCiclos[i].cfg), x.dias, novosCiclos[i].cfg).falhas);
+    indices.push(i);
+  });
+
+  // exercicios que a app ainda nao tem
+  var cfgRef = ciclos[ciclos.length - 1].cfg, grupoDe = {};
+  cfgRef.acc.forEach(function (a) { grupoDe[a[0]] = a[1]; });
+  var existe = {}, criados = [], idEx = proximoId(Estado.exercicios);
+  Estado.exercicios.forEach(function (e) { existe[e.nome] = 1; });
+  (b.ciclos || []).forEach(function (x) {
+    Object.keys(x.dias || {}).forEach(function (k) {
+      var m = x.dias[k];
+      (m.trocar || []).map(function (t) { return { nome: t.para, grupo: t.grupo }; })
+        .concat(m.novos || []).forEach(function (n) {
+          var nomeApp = PLANO_NOME_NA_APP[n.nome] || n.nome;
+          if (existe[nomeApp]) return;
+          existe[nomeApp] = 1;
+          criados.push({ id: idEx++, nome: nomeApp, grupo: GRUPO_NA_APP[grupoDe[n.nome] || n.grupo] || 'Outros',
+            tipo: 'peso_reps', descansoSeg: null, notas: null, arquivado: false });
+        });
+    });
+  });
+
+  var exercicios = Estado.exercicios.concat(criados), resultados = [], proxSerie = proximoId(Estado.series);
+  indices.forEach(function (i) {
+    var mapa = mapaDoPlano(novosCiclos, Estado.sessoes);
+    var r = seriesDoManual(mapa, Estado.series, exercicios, i, hoje, proxSerie);
+    proxSerie += r.novas.length;
+    resultados.push(r);
+    linhas.push('Ciclo ' + (i + 1) + ': ' + plural(r.dias.length, 'treino refeito', 'treinos refeitos') +
+      (r.comFeitas.length ? ' · ' + r.comFeitas.length + ' com séries feitas ficam como estão' : '') +
+      (r.emFalta.length ? ' · faltam exercícios: ' + r.emFalta.join(', ') : ''));
+  });
+  if (seguinte) {
+    linhas.push('Ciclo seguinte: ' + plural(Object.keys(seguinte.dias || {}).length, 'dia mudado', 'dias mudados') +
+      ', entram quando o gravares a começar por ' + (cfgRef.nomeLift[seguinte.lifts[0]] || seguinte.lifts[0]));
+  }
+  if (criados.length) linhas.push('Exercícios novos na app: ' + criados.map(function (e) { return e.nome; }).join(', '));
+
+  abrirFolha('Mudanças ao plano',
+    '<p class="mini fraco" style="margin-top:0">' + esc(nome) + '</p>' +
+    '<div class="cartao" style="margin-top:0">' + linhas.map(function (l) {
+      return '<div class="pequeno" style="padding:3px 0">' + esc(l) + '</div>'; }).join('') + '</div>' +
+    (falhas.length ? '<div class="cartao" style="border-color:var(--ambar)"><h3 style="color:var(--ambar)">' +
+      plural(falhas.length, 'mudança não encaixa', 'mudanças não encaixam') + '</h3>' +
+      falhas.map(function (f) { return '<div class="mini">' + esc(f) + '</div>'; }).join('') + '</div>' : '') +
+    '<button class="btn primaria larga" id="mpAplicar">Aplicar</button>' +
+    '<button class="btn larga" id="mpCancelar" style="margin-top:8px">Cancelar</button>',
+    function (c) {
+      c.querySelector('#mpCancelar').onclick = fecharFolha;
+      c.querySelector('#mpAplicar').onclick = function () {
+        this.disabled = true;
+        var apagar = [], novas = [];
+        resultados.forEach(function (r) { apagar = apagar.concat(r.apagar); novas = novas.concat(r.novas); });
+        var fora = {};
+        apagar.forEach(function (id) { fora[id] = 1; });
+        BD.guardarMuitos('exercicios', criados)
+          .then(function () { return BD.apagarMuitos('series', apagar); })
+          .then(function () { return BD.guardarMuitos('series', novas); })
+          .then(function () { return guardarDefinicao('planoCiclos', novosCiclos); })
+          .then(function () {
+            return seguinte ? guardarDefinicao('planoManualSeguinte', { lifts: seguinte.lifts, dias: seguinte.dias }) : null;
+          })
+          .then(function () {
+            Estado.exercicios = exercicios;
+            Estado.series = Estado.series.filter(function (s) { return !fora[s.id]; }).concat(novas);
+            reindexar();
+            fecharFolha();
+            avisar('Mudanças aplicadas: ' + plural(novas.length, 'série refeita', 'séries refeitas'));
+            render();
+          })
+          .catch(function (e) { avisar('Não aplicou: ' + e.message); });
+      };
+    });
+}
+
 function importarBackupFicheiro(texto, nome) {
   var b;
   try { b = JSON.parse(texto); }
   catch (erro) { avisar('O ficheiro não é JSON válido'); return; }
+  if (b && b.formato === 'treinos-mudancas-plano') { importarMudancasPlano(b, nome); return; }
   if (!b || b.formato !== 'treinos-backup' || !Array.isArray(b.series)) {
     avisar('Isto não é um backup da app Treinos');
     return;
@@ -8527,8 +8717,28 @@ function prepararCicloSeguinte() {
   };
 
   function desenhar(corpo) {
-    var plano, erro = null, falhas = [];
-    try { plano = gerarPlano(cfg); falhas = validarPlano(plano); }
+    var plano, erro = null, falhas = [], manual = null, avisoManual = '';
+    var pend = Estado.definicoes.planoManualSeguinte;
+    try {
+      plano = gerarPlano(cfg); falhas = validarPlano(plano);
+      // as mudancas a mao entram por cima; as 17 regras so travam o plano gerado
+      if (pend && pend.dias && pend.lifts.join() === cfg.lifts.join()) {
+        var am = aplicarManual(plano, pend.dias, cfg);
+        plano = am.plano;
+        manual = pend.dias;
+        var fm = validarPlano(plano).filter(function (f) { return falhas.indexOf(f) === -1; });
+        avisoManual = '<div class="cartao" style="border-color:var(--ambar)"><h3 style="color:var(--ambar)">' +
+          'Com as tuas mudanças (' + plural(Object.keys(manual).length, 'dia', 'dias') + ')</h3>' +
+          am.falhas.map(function (f) { return '<div class="mini">' + esc(f) + '</div>'; }).join('') +
+          (fm.length ? '<div class="mini" style="margin-top:4px">' + plural(fm.length, 'regra falha', 'regras falham') +
+            ' por causa delas; grava-se na mesma.</div>' +
+            fm.map(function (f) { return '<div class="mini fraco">' + esc(f) + '</div>'; }).join('')
+            : '<div class="mini">As 17 regras passam na mesma.</div>') + '</div>';
+      } else if (pend && pend.dias) {
+        avisoManual = '<p class="mini" style="color:var(--ambar)">As tuas mudanças são para um ciclo que começa por ' +
+          esc(cfg.nomeLift[pend.lifts[0]] || pend.lifts[0]) + ': escolhe-o em "Máximos na primeira segunda" para entrarem.</p>';
+      }
+    }
     catch (e) { erro = e.message; }
 
     var html = '<label class="campo"><span>Começa na segunda</span>' +
@@ -8559,6 +8769,7 @@ function prepararCicloSeguinte() {
           falhas.length + ' regra(s) falham — não se grava</h3>' +
           falhas.slice(0, 8).map(function (f) { return '<div class="mini">' + esc(f) + '</div>'; }).join('') + '</div>'
         : '<p class="mini" style="color:var(--verde);margin:0 0 10px">As 17 regras passam.</p>';
+      html += avisoManual;
       html += '<p class="mini fraco" style="margin:0 0 8px">Toca num dia para ver os exercícios. ' +
         'Tocar num exercício tira-o desse dia e o plano refaz-se.</p>';
       plano.calendario.forEach(function (sem) {
@@ -8625,7 +8836,7 @@ function prepararCicloSeguinte() {
       };
     });
     var gravar = corpo.querySelector('#csGravar');
-    if (!gravar.disabled) gravar.onclick = function () { gravarCiclo(cfg, plano); };
+    if (!gravar.disabled) gravar.onclick = function () { gravarCiclo(cfg, plano, manual); };
   }
 
   abrirFolha('Ciclo ' + (ciclos.length + 1), '<div id="csCorpo"></div>', function (c) {
@@ -8661,7 +8872,7 @@ function apagarUltimoCiclo() {
     });
 }
 
-function gravarCiclo(cfg, plano) {
+function gravarCiclo(cfg, plano, manual) {
   if (ciclosDoPlano().some(function (c) { return c.dataInicio === cfg.dataInicio; })) {
     avisar('Já há um ciclo a começar a ' + dataCurta(cfg.dataInicio));
     return;
@@ -8681,12 +8892,15 @@ function gravarCiclo(cfg, plano) {
     });
   });
   r.sessoes.forEach(function (s) { s.plano = identidade[s.data]; });
-  var ciclos = ciclosDoPlano().concat([{ dataInicio: cfg.dataInicio, cfg: cfg, gravado: hojeIso() }]);
+  var rec = { dataInicio: cfg.dataInicio, cfg: cfg, gravado: hojeIso() };
+  if (manual) rec.manual = manual;
+  var ciclos = ciclosDoPlano().concat([rec]);
   avisar('A gravar…');
   BD.guardarMuitos('sessoes', r.sessoes)
     .then(function () { return BD.guardarMuitos('series', r.series); })
     .then(function () { return guardarDefinicao('planoCiclos', ciclos); })
     .then(function () { return guardarDefinicao('planoPausados', []); })
+    .then(function () { return manual ? guardarDefinicao('planoManualSeguinte', null) : null; })
     .then(function () {
       Estado.sessoes = Estado.sessoes.concat(r.sessoes);
       Estado.series = Estado.series.concat(r.series);

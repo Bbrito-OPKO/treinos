@@ -151,6 +151,19 @@ que ainda têm dias por vir (os acabados ficam), e todas as séries do lift
 sobem na mesma proporção, a 2,5 kg; das séries gravadas, mudam só as por fazer,
 de hoje em diante.
 
+**Mudanças à mão** (desde 17/10/2026). Exercícios mudados fora da app (tirar,
+trocar, acrescentar a seguir a outro) entram por um ficheiro
+`formato: 'treinos-mudancas-plano'`, pelo mesmo botão do backup (Mais →
+Importar backup). Ficam no ciclo, em `rec.manual`, por `semana|dia` e pelo
+NOME do exercício, por cima do plano gerado. A carga de um exercício do
+catálogo sai da regra dos acessórios; um de fora do catálogo traz as séries no
+ficheiro. As do ciclo gravado refazem as séries por fazer dos dias mudados, de
+hoje em diante (um dia com séries feitas fica). As do ciclo seguinte esperam em
+`definicoes.planoManualSeguinte` e entram na folha do ciclo seguinte se a ordem
+dos lifts for a mesma. As 17 regras continuam a travar o plano gerado; o que as
+mudanças à mão partem aparece na folha, e grava-se na mesma (foi ele que as
+pediu, sabendo quais falham). Exemplo real: `testes/mudancas-2026-10-17.json`.
+
 As decisões ficam na loja `sugestoes` (pela chave); uma sugestão ignorada não volta.
 As sessões do plano guardam a identidade em `plano: { ciclo, semana, dia }` — é o
 que as deixa mudar de data sem se perderem. As do ciclo 1 reconhecem-se pela nota
