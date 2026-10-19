@@ -3251,6 +3251,34 @@ function metaDeMacros(perfil, pesoKg, gasto) {
   return macrosParaKcal(kcal, pesoKg, perfil.objetivo);
 }
 
+/* O que se tira ao peso da balanca (19/10/2026, valores do Bruno). A base e
+   sempre de t-shirt; o resto marca-se em cada pesagem. */
+var DESCONTOS_PESAGEM = [
+  { id: 'calcas', nome: 'Calças', kg: 0.5 },
+  { id: 'meias', nome: 'Meias', kg: 0.1 },
+  { id: 'semCoco', nome: 'Ainda não fiz cocó', kg: 0.4 }
+];
+
+/* Peso efetivo: o da balanca menos o que estiver marcado. Ids que nao estao
+   na lista nao contam. */
+function pesoEfetivo(bruto, marcados) {
+  var tirar = DESCONTOS_PESAGEM.reduce(function (s, d) {
+    return s + ((marcados || []).indexOf(d.id) >= 0 ? d.kg : 0);
+  }, 0);
+  return _um(bruto - tirar);
+}
+
+/* kg passa a ser o peso efetivo. A balanca e o que se tirou so ficam
+   guardados quando ha descontos. */
+function guardarBruto(registo, bruto, descontos) {
+  var m = (descontos || []).filter(function (id) {
+    return DESCONTOS_PESAGEM.some(function (d) { return d.id === id; });
+  });
+  registo.kg = pesoEfetivo(bruto, m);
+  if (m.length) { registo.bruto = bruto; registo.descontos = m; }
+  else { delete registo.bruto; delete registo.descontos; }
+}
+
 /* Media das pesagens nos `dias` ate `data` (inclusive). */
 function pesoMedio(pesagens, data, dias) {
   var desde = _somarDias(data, -(dias - 1));
@@ -6683,7 +6711,7 @@ function analisePeso(corpo) {
         '<input id="pcValor" type="number" inputmode="decimal" step="any" placeholder="' +
         (todas.length ? num(todas[todas.length - 1].kg, 1) : '75,0') + '"></label>' +
       '<button class="btn primaria" id="pcGuardar" style="flex:none">Registar</button>' +
-    '</div></div>';
+    '</div>' + caixasDescontos('pc', []) + '</div>';
 
   if (!todas.length) {
     corpo.innerHTML = html +
@@ -6735,6 +6763,8 @@ function analisePeso(corpo) {
     todas.slice(-10).reverse().map(function (p) {
       return '<button class="item" data-pesagem="' + p.id + '">' +
         '<span class="crescer">' + esc(dataLonga(p.data)) + '</span>' +
+        (p.bruto != null ? '<span class="mini fraco nums" style="margin-right:8px">balança ' +
+          num(p.bruto, 1) + '</span>' : '') +
         '<span class="nums" style="font-weight:600">' + num(p.kg, 1) + ' kg</span>' +
         '<span class="seta">&#8250;</span></button>';
     }).join('') + '</div>';
@@ -6749,8 +6779,9 @@ function ligarPeso() {
     guardar.onclick = function () {
       var v = parseFloat($('#pcValor').value);
       if (!Number.isFinite(v) || v <= 0) { avisar('Falta o peso'); return; }
-      registarPeso(hojeIso(), Math.round(v * 10) / 10);
+      registarPeso(hojeIso(), Math.round(v * 10) / 10, descontosMarcados(document, 'pc'));
     };
+    ligarDescontos(document, 'pc');
   }
   Array.prototype.forEach.call(document.querySelectorAll('[data-pesagem]'), function (b) {
     b.onclick = function () { editarPesagem(+b.dataset.pesagem); };
@@ -7253,11 +7284,47 @@ function ligarDefinicoes() {
   };
 }
 
+/* As caixas do que se tira ao peso (calcas, meias, coco) e a linha com o
+   peso efetivo, que muda a cada toque. `pre` e o prefixo dos ids. */
+function caixasDescontos(pre, marcados) {
+  return '<div style="margin-top:10px">' + DESCONTOS_PESAGEM.map(function (d) {
+    return '<label class="linha" style="gap:8px;padding:6px 0">' +
+      '<input type="checkbox" data-desc-' + pre + '="' + d.id + '"' +
+      (marcados.indexOf(d.id) >= 0 ? ' checked' : '') + ' style="width:20px;height:20px">' +
+      '<span class="crescer">' + esc(d.nome) + '</span>' +
+      '<span class="mini fraco nums">−' + num(d.kg, 1) + ' kg</span></label>';
+  }).join('') +
+  '<p class="mini fraco" id="' + pre + 'Efetivo" style="margin:6px 0 0">Base: com t-shirt.</p></div>';
+}
+
+function descontosMarcados(raiz, pre) {
+  return Array.prototype.filter.call(raiz.querySelectorAll('[data-desc-' + pre + ']'), function (c) {
+    return c.checked;
+  }).map(function (c) { return c.getAttribute('data-desc-' + pre); });
+}
+
+function ligarDescontos(raiz, pre) {
+  var campo = raiz.querySelector('#' + pre + 'Valor');
+  var linha = raiz.querySelector('#' + pre + 'Efetivo');
+  function mostrar() {
+    var v = parseFloat(campo.value);
+    var m = descontosMarcados(raiz, pre);
+    linha.innerHTML = Number.isFinite(v) && v > 0 && m.length
+      ? 'Peso efetivo: <b class="nums">' + num(pesoEfetivo(v, m), 1) + ' kg</b> (base: com t-shirt)'
+      : 'Base: com t-shirt.';
+  }
+  campo.addEventListener('input', mostrar);
+  Array.prototype.forEach.call(raiz.querySelectorAll('[data-desc-' + pre + ']'), function (c) {
+    c.addEventListener('change', mostrar);
+  });
+  mostrar();
+}
+
 /* Uma pesagem por dia: registar outra vez no mesmo dia substitui. */
-function registarPeso(data, kg) {
+function registarPeso(data, bruto, descontos) {
   var ja = Estado.pesagens.find(function (p) { return p.data === data; });
-  var registo = ja || { id: proximoId(Estado.pesagens), data: data, kg: kg };
-  registo.kg = kg;
+  var registo = ja || { id: proximoId(Estado.pesagens), data: data };
+  guardarBruto(registo, bruto, descontos);
   if (!ja) Estado.pesagens.push(registo);
   BD.guardar('pesagens', registo).then(function () {
     avisar(ja ? 'Peso de hoje atualizado' : 'Peso registado');
@@ -7269,15 +7336,18 @@ function editarPesagem(id) {
   var p = Estado.pesagens.find(function (x) { return x.id === id; });
   if (!p) return;
   abrirFolha(dataLonga(p.data),
-    '<label class="campo"><span>Peso (kg)</span>' +
-      '<input id="epValor" type="number" inputmode="decimal" step="any" value="' + p.kg + '"></label>' +
-    '<button class="btn primaria larga" id="epGuardar">Guardar</button>' +
+    '<label class="campo"><span>Peso na balança (kg)</span>' +
+      '<input id="epValor" type="number" inputmode="decimal" step="any" value="' +
+      (p.bruto != null ? p.bruto : p.kg) + '"></label>' +
+    caixasDescontos('ep', p.descontos || []) +
+    '<button class="btn primaria larga" id="epGuardar" style="margin-top:12px">Guardar</button>' +
     '<button class="btn perigo larga" id="epApagar" style="margin-top:8px">Apagar pesagem</button>',
     function (corpo) {
+      ligarDescontos(corpo, 'ep');
       corpo.querySelector('#epGuardar').onclick = function () {
         var v = parseFloat(corpo.querySelector('#epValor').value);
         if (!Number.isFinite(v) || v <= 0) { avisar('Valor inválido'); return; }
-        p.kg = Math.round(v * 10) / 10;
+        guardarBruto(p, Math.round(v * 10) / 10, descontosMarcados(corpo, 'ep'));
         BD.guardar('pesagens', p).then(function () { fecharFolha(); avisar('Guardado'); render(); });
       };
       corpo.querySelector('#epApagar').onclick = function () {

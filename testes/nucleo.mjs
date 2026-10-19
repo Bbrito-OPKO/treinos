@@ -38,7 +38,7 @@ const NOMES = [
   'REFEICOES', 'normalizarTexto', 'alimentosDoInsa', 'pesquisarAlimentos', 'macrosDe',
   'totaisDoDia', 'alimentoDoOff', 'registoDeComida', 'copiarComidas', 'habitosDeComida',
   'KCAL_POR_KG', 'ATIVIDADES', 'OBJETIVOS', 'gastoPorFormula', 'macrosParaKcal', 'metaDeMacros',
-  'pesoMedio', 'tendenciaPeso', 'diasComComida', 'gastoMedido', 'resumoTreinoSemana', 'sugerirDieta',
+  'DESCONTOS_PESAGEM', 'pesoEfetivo', 'guardarBruto', 'pesoMedio', 'tendenciaPeso', 'diasComComida', 'gastoMedido', 'resumoTreinoSemana', 'sugerirDieta',
   'tipoDeDia', 'versaoDoPlano', 'planoAtualAlimentar', 'totaisDeItens', 'consumoDoDia', 'tendenciaCintura', 'ajustarPlanoKcal',
   'DEFINICOES_NO_BACKUP', 'IA_MODELO', 'IA_ESQUEMA', 'iaCabecalhos', 'resumoParaIA', 'pedidoIA', 'erroIA',
   'aplicarDietaGramas', 'lerRespostaIA', 'pedidoHermes', 'lerTextoIA', 'HERMES_URL_PADRAO'
