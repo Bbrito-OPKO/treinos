@@ -151,6 +151,8 @@ que ainda têm dias por vir (os acabados ficam), e todas as séries do lift
 sobem na mesma proporção, a 2,5 kg; das séries gravadas, mudam só as por fazer,
 de hoje em diante.
 
+**Descontos na pesagem** (desde 19/10/2026). A base é sempre de t-shirt. No ecrã do peso há 3 caixas: calças −0,5 kg, meias −0,1 kg, "ainda não fiz cocó" −0,4 kg (`DESCONTOS_PESAGEM`). O `kg` guardado é o peso efetivo; com descontos ficam também `bruto` (a balança) e `descontos` (os ids). Editar uma pesagem mostra a balança e as caixas marcadas.
+
 **Mudanças à mão** (desde 17/10/2026). Exercícios mudados fora da app (tirar,
 trocar, acrescentar a seguir a outro) entram por um ficheiro
 `formato: 'treinos-mudancas-plano'`, pelo mesmo botão do backup (Mais →
