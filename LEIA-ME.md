@@ -160,7 +160,10 @@ Importar backup). Ficam no ciclo, em `rec.manual`, por `semana|dia` e pelo
 NOME do exercício, por cima do plano gerado. A carga de um exercício do
 catálogo sai da regra dos acessórios; um de fora do catálogo traz as séries no
 ficheiro. As do ciclo gravado refazem as séries por fazer dos dias mudados, de
-hoje em diante (um dia com séries feitas fica). As do ciclo seguinte esperam em
+hoje em diante. Num dia já começado (desde 19/10/2026), um exercício com
+alguma série feita fica inteiro; sai só o que não está na lista nova e está
+por fazer; entra só o que falta, depois do que já lá está. Importar duas vezes
+não duplica. As do ciclo seguinte esperam em
 `definicoes.planoManualSeguinte` e entram na folha do ciclo seguinte se a ordem
 dos lifts for a mesma. As 17 regras continuam a travar o plano gerado; o que as
 mudanças à mão partem aparece na folha, e grava-se na mesma (foi ele que as

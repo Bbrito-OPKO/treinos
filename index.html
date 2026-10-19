@@ -2925,7 +2925,7 @@ function seriesDoManual(mapa, series, exercicios, indiceCiclo, hoje, proxIdSerie
   var dias = [], emFalta = [], comFeitas = [];
   c.dias.forEach(function (d) {
     if (!manual[d.semana + '|' + d.dia] || !d.sessao || d.data < hoje) return;
-    if ((porSessao[d.sessao.id] || []).some(serieFeita)) { comFeitas.push(d.data); return; }
+    if ((porSessao[d.sessao.id] || []).some(serieFeita)) comFeitas.push(d.data);
     d.exercicios.forEach(function (ex) {
       var nome = PLANO_NOME_NA_APP[ex.nome] || ex.nome;
       if (!bib[nome] && emFalta.indexOf(nome) === -1) emFalta.push(nome);
@@ -2935,10 +2935,27 @@ function seriesDoManual(mapa, series, exercicios, indiceCiclo, hoje, proxIdSerie
   if (emFalta.length) return { apagar: [], novas: [], emFalta: emFalta, comFeitas: comFeitas, dias: [] };
   var apagar = [], novas = [], id = proxIdSerie;
   dias.forEach(function (d) {
-    (porSessao[d.sessao.id] || []).forEach(function (s) { apagar.push(s.id); });
-    var r = _seriesDoDia(d.exercicios, bib, d.sessao.id, d.sessao.data, id);
-    novas = novas.concat(r);
-    id += r.length;
+    var doDia = porSessao[d.sessao.id] || [];
+    if (comFeitas.indexOf(d.data) === -1) {
+      doDia.forEach(function (s) { apagar.push(s.id); });
+      var r = _seriesDoDia(d.exercicios, bib, d.sessao.id, d.sessao.data, id);
+      novas = novas.concat(r);
+      id += r.length;
+      return;
+    }
+    /* Dia ja comecado (19/10/2026): o que tem series feitas fica todo; sai
+       so o que nao esta na lista nova e esta por fazer; entra so o que falta. */
+    var naLista = {}, naSessao = {}, comFeita = {};
+    d.exercicios.forEach(function (ex) { naLista[bib[PLANO_NOME_NA_APP[ex.nome] || ex.nome].id] = 1; });
+    doDia.forEach(function (s) { naSessao[s.exercicioId] = 1; if (serieFeita(s)) comFeita[s.exercicioId] = 1; });
+    doDia.forEach(function (s) { if (!naLista[s.exercicioId] && !comFeita[s.exercicioId]) apagar.push(s.id); });
+    var ordem = doDia.reduce(function (m, s) { return Math.max(m, s.ordem); }, -1) + 1;
+    d.exercicios.forEach(function (ex, i) {
+      if (naSessao[bib[PLANO_NOME_NA_APP[ex.nome] || ex.nome].id]) return;
+      _seriesDoDia([ex], bib, d.sessao.id, d.sessao.data, id).forEach(function (s) {
+        s.ordemExercicio = i; s.ordem = ordem++; novas.push(s); id++;
+      });
+    });
   });
   return { apagar: apagar, novas: novas, emFalta: [], comFeitas: comFeitas,
     dias: dias.map(function (d) { return d.data; }) };
@@ -7507,7 +7524,8 @@ function importarMudancasPlano(b, nome) {
     proxSerie += r.novas.length;
     resultados.push(r);
     linhas.push('Ciclo ' + (i + 1) + ': ' + plural(r.dias.length, 'treino refeito', 'treinos refeitos') +
-      (r.comFeitas.length ? ' · ' + r.comFeitas.length + ' com séries feitas ficam como estão' : '') +
+      (r.comFeitas.length ? ' · ' + plural(r.comFeitas.length, 'já começado', 'já começados') +
+        ': o que tem séries feitas fica, muda só o resto' : '') +
       (r.emFalta.length ? ' · faltam exercícios: ' + r.emFalta.join(', ') : ''));
   });
   if (seguinte) {

@@ -95,23 +95,26 @@ function appCom(rec) {
   return { exercicios, sessoes: r.sessoes, series: r.series };
 }
 
-test('series: so os dias mudados de hoje em diante, e um dia com series feitas fica', () => {
+test('series: so os dias mudados de hoje em diante; num dia comecado a serie feita fica', () => {
   const rec = { dataInicio: '2026-09-28', cfg: cfg2(), gravado: null };
   const app = appCom(rec);
   const comMudancas = Object.assign({}, rec, { manual: MUD.ciclos[0].dias });
   const sessao = data => app.sessoes.find(s => s.data === data);
-  app.series.find(s => s.sessaoId === sessao('2026-10-23').id).feita = true;   // sexta ja comecada
+  const feita = app.series.find(s => s.sessaoId === sessao('2026-10-23').id);
+  feita.feita = true;   // sexta ja comecada
   const mapa = N.mapaDoPlano([comMudancas], app.sessoes);
   const prox = Math.max(...app.series.map(s => s.id)) + 1;
   const r = N.seriesDoManual(mapa, app.series, app.exercicios, 0, '2026-10-17', prox);
 
   assert.deepEqual(r.emFalta, []);
   assert.deepEqual(r.comFeitas, ['2026-10-23']);
-  assert.deepEqual(r.dias, ['2026-10-19', '2026-10-20', '2026-10-22']);
+  assert.deepEqual(r.dias, ['2026-10-19', '2026-10-20', '2026-10-22', '2026-10-23']);
   const apagadas = new Set(r.apagar);
   const doDia = data => app.series.filter(s => s.sessaoId === sessao(data).id);
-  assert.equal(r.apagar.length, ['2026-10-19', '2026-10-20', '2026-10-22'].reduce((t, d) => t + doDia(d).length, 0));
-  assert.ok(doDia('2026-10-23').every(s => !apagadas.has(s.id)));
+  const inteiros = ['2026-10-19', '2026-10-20', '2026-10-22'];
+  assert.equal(r.apagar.filter(i => inteiros.includes(app.series.find(s => s.id === i).data)).length,
+    inteiros.reduce((t, d) => t + doDia(d).length, 0));
+  assert.ok(!apagadas.has(feita.id));
   assert.ok(app.series.filter(s => s.data < '2026-10-17').every(s => !apagadas.has(s.id)));
   assert.deepEqual(r.novas.map(s => s.id), r.novas.map((_, i) => prox + i));
 
@@ -124,6 +127,54 @@ test('series: so os dias mudados de hoje em diante, e um dia com series feitas f
   assert.ok(ter.every(s => s.sessaoId === sessao('2026-10-20').id && !s.feita));
   const dips = ter.filter(s => nome(s.exercicioId) === 'Chest Dips').map(s => [s.peso, s.reps]);
   assert.deepEqual(dips, [[0, 8], [0, 6]], 'Chest Dips do catalogo padrao: 0 kg');
+});
+
+test('series: dia ja comecado muda so o que esta por fazer (19/10/2026)', () => {
+  const rec = { dataInicio: '2026-09-28', cfg: cfg2(), gravado: null };
+  const app = appCom(rec);
+  const sessao = data => app.sessoes.find(s => s.data === data);
+  const nome = id => app.exercicios.find(e => e.id === id).nome;
+  const id = n => app.exercicios.find(e => e.nome === n).id;
+  const seg = app.series.filter(s => s.sessaoId === sessao('2026-10-19').id);
+  // feito: o supino todo e a 1.a serie do Smith Squat (sai na tabela)
+  seg.filter(s => nome(s.exercicioId) === 'Flat Barbell Bench Press').forEach(s => { s.feita = true; });
+  seg.find(s => nome(s.exercicioId) === 'Smith Squat').feita = true;
+  const antes = copia(seg);
+  const mapa = N.mapaDoPlano([Object.assign({}, rec, { manual: MUD.ciclos[0].dias })], app.sessoes);
+  const prox = Math.max(...app.series.map(s => s.id)) + 1;
+  const r = N.seriesDoManual(mapa, app.series, app.exercicios, 0, '2026-10-19', prox);
+
+  assert.deepEqual(r.comFeitas, ['2026-10-19']);
+  assert.ok(r.dias.includes('2026-10-19'));
+  const apagadas = new Set(r.apagar);
+  const novasSeg = r.novas.filter(s => s.data === '2026-10-19');
+  // nenhuma serie feita sai, e o Smith Squat comecado fica inteiro
+  assert.ok(antes.filter(s => s.feita).every(s => !apagadas.has(s.id)));
+  assert.ok(antes.filter(s => s.exercicioId === id('Smith Squat')).every(s => !apagadas.has(s.id)));
+  // Leg Press e Lateral Machine Raise (por fazer, fora da lista) saem
+  for (const n of ['Leg Press', 'Lateral Machine Raise'])
+    assert.ok(antes.filter(s => s.exercicioId === id(n)).every(s => apagadas.has(s.id)), n);
+  // so isto sai: o que fica na lista e por fazer nao se mexe
+  const sai = antes.filter(s => apagadas.has(s.id)).map(s => nome(s.exercicioId));
+  assert.deepEqual([...new Set(sai)].sort(), ['Lateral Machine Raise', 'Leg Press']);
+  // entram os 3 novos, com as cargas do plano mudado, por fazer
+  const entra = {};
+  novasSeg.forEach(s => (entra[nome(s.exercicioId)] = entra[nome(s.exercicioId)] || []).push([s.peso, s.reps]));
+  assert.deepEqual(Object.keys(entra).sort(), ['Leg Curl Machine', 'Lungees', 'Seated Dumbbell Press']);
+  assert.deepEqual(entra['Leg Curl Machine'], [[25, 8], [30, 6]]);
+  assert.ok(novasSeg.every(s => !s.feita && s.sessaoId === sessao('2026-10-19').id));
+  // as novas vao depois das que ja la estavam, e na posicao da lista nova
+  const maxOrdem = Math.max(...antes.map(s => s.ordem));
+  assert.ok(novasSeg.every(s => s.ordem > maxOrdem));
+  const pos = ESPERADO['2026-10-19'].map(n => NA_APP[n] || n);
+  novasSeg.forEach(s => assert.equal(s.ordemExercicio, pos.indexOf(nome(s.exercicioId))));
+  assert.deepEqual(r.novas.map(s => s.id), r.novas.map((_, i) => prox + i));
+
+  // importar outra vez nao duplica nem apaga nada
+  const depois = app.series.filter(s => !apagadas.has(s.id)).concat(r.novas);
+  const r2 = N.seriesDoManual(mapa, depois, app.exercicios, 0, '2026-10-19', prox + r.novas.length);
+  assert.equal(r2.novas.filter(s => s.data === '2026-10-19').length, 0);
+  assert.ok(r2.apagar.every(i => depois.find(s => s.id === i).data !== '2026-10-19'));
 });
 
 test('series: falta um exercicio na app, nada se mexe', () => {
